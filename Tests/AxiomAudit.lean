@@ -76,6 +76,7 @@ zero custom axioms, zero `Lean.ofReduceBool` / `native_decide` trust.
 #print axioms MAGLean.Certificate.kClassifyMIMAG_eq_classifyMIMAG
 #print axioms MAGLean.Certificate.kStrainHeterogeneity_eq
 #print axioms MAGLean.Certificate.kNonStrainCont_eq
+#print axioms MAGLean.Certificate.kPurityGatedScore_eq_purityGatedScore
 #print axioms MAGLean.Certificate.kCheckTaxCoherent_sound
 #print axioms MAGLean.Certificate.kRankAudit_eq_taxonomy
 #print axioms MAGLean.Certificate.kRankAudit_stealth_alert_sound

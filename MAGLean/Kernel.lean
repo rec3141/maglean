@@ -152,8 +152,10 @@ structure MAGCertificate where
   strainHeterogeneity : Rat
   nonStrainContamination : Rat
   compositeScoreQ5 : Rat
+  worstOptimisticPurity : Rat
+  purityGatedQ5 : Option Rat
+  stealthChimeraAlert : Bool
   hoeffding95Radius : Rat
-  contigHoeffding95Radius : Rat
   speciesConservativeImpurity : Rat
   mimagTier : KMIMAGTier
   taxCoherent : Bool
@@ -216,6 +218,11 @@ def kStrainHeterogeneity (h t : Nat) : Rat :=
 
 def kNonStrainCont (cont sh : Rat) : Rat :=
   cont * (1 - sh)
+
+/-- Purity-gated composite score (`some (comp - pen * cont)` iff `τ_p ≤ purity`, else `none`),
+bridged directly to `Quality.purityGatedScore` in `MAGLean.Certificate`. -/
+def kPurityGatedScore (pen τ_p comp cont purity : Rat) : Option Rat :=
+  if τ_p ≤ purity then some (comp - pen * cont) else none
 
 def kClassifyMIMAG (comp cont : Rat) (rna : KRNAProfile) : KMIMAGTier :=
   if (9 : Rat) / 10 < comp && cont < (1 : Rat) / 20 && rna.satisfiesHQ then
@@ -331,7 +338,6 @@ def auditMAG (ev : MAGEvidence) (prov : ReportProvenance := {}) (cfg : AuditConf
   let allMarkers := dedupStrings (ev.markerSets.flatten)
   let accContigs := ev.contigs.filter (fun c => c.markers.all (fun g => !allMarkers.contains g))
   let markerContigs := ev.contigs.length - accContigs.length
-  let contigRad95 := certifiedHoeffding95Radius markerContigs
   let accBp := accContigs.foldl (fun s c => s + c.length) 0
   let totalBp := ev.contigs.foldl (fun s c => s + c.length) 0
   let mut alerts : List String := []
@@ -339,28 +345,34 @@ def auditMAG (ev : MAGEvidence) (prov : ReportProvenance := {}) (cfg : AuditConf
     alerts := alerts ++ ["TAXONOMIC_INCOHERENCE: Contig lineages violate tree consistency or prefix-closedness."]
   if (9 : Rat) / 10 < comp && cont < (1 : Rat) / 20 && !ev.rna.satisfiesHQ then
     alerts := alerts ++ ["MIMAG_HQ_RNA_DOWNGRADE: Marker metrics pass HQ (>90% comp, <5% cont) but RNA profile fails (23S/16S/5S + ≥18 tRNAs); downgraded to MQ."]
-  -- Stealth chimera alert (Issues #8): evaluate only at ranks `≤ cfg.maxChimeraRank`
-  -- (default `genus`, avoiding species-level splits on novel strains) with classified bp
-  -- fraction `1 - unclassifiedFrac ≥ cfg.minClassifiedFrac` (default 50%).
+  -- Stealth chimera & purity-gate evaluation (Issues #8, #15): evaluate at ranks
+  -- `≤ cfg.maxChimeraRank` (default `genus`, avoiding species-level splits on novel strains)
+  -- with classified bp fraction `1 - unclassifiedFrac ≥ cfg.minClassifiedFrac` (default 50%).
   let worstOptimisticPurity : Rat :=
     rankAudits.foldl (fun acc ra =>
       let classFrac := (1 : Rat) - ra.unclassifiedFrac
       if KTaxRank.le ra.rank cfg.maxChimeraRank && cfg.minClassifiedFrac ≤ classFrac &&
           ra.purityOpt < acc then ra.purityOpt else acc) (1 : Rat)
-  if cont < (1 : Rat) / 20 && worstOptimisticPurity < (9 : Rat) / 10 then
+  let gatedQ5 : Option Rat := kPurityGatedScore 5 ((9 : Rat) / 10) comp cont worstOptimisticPurity
+  let stealthFlag : Bool := cont < (1 : Rat) / 20 && worstOptimisticPurity < (9 : Rat) / 10
+  if stealthFlag then
     alerts := alerts ++ [s!"STEALTH_CHIMERA_ALERT: Low marker contamination (<5%) masks multi-clade taxonomic chimerism (>10% of bp classified outside the dominant taxon at rank ≤ {cfg.maxChimeraRank.label} with ≥{formatPercent cfg.minClassifiedFrac} classified bp)."]
-  -- Unclassified dilution alert (Issue #9): fire only when a coarser rank (≤ maxChimeraRank)
-  -- is genuinely impure (`purityDrop < 90%`) and a finer rank masks it to `purityDrop ≥ 90%`
-  -- by dropping unclassified contigs, rather than on benign upward drift of already-clean bins.
+  -- Unclassified dilution alert (Issues #9, #14): fire only when a coarser rank
+  -- (`≤ maxChimeraRank`) passes the minimum-classified gate and is genuinely impure
+  -- (`purityOpt < 90%` and `purityDrop < 90%`), AND a finer rank that also passes the
+  -- minimum-classified gate masks that impurity to `purityDrop ≥ 90%`.
   let mut dilutionDetected := false
   for ra₁ in rankAudits do
     for ra₂ in rankAudits do
+      let classFrac₁ := (1 : Rat) - ra₁.unclassifiedFrac
+      let classFrac₂ := (1 : Rat) - ra₂.unclassifiedFrac
       if KTaxRank.le ra₁.rank cfg.maxChimeraRank && KTaxRank.lt ra₁.rank ra₂.rank &&
-          ra₁.unclassifiedFrac < 1 && ra₂.unclassifiedFrac < 1 &&
+          cfg.minClassifiedFrac ≤ classFrac₁ && cfg.minClassifiedFrac ≤ classFrac₂ &&
+          ra₁.purityOpt < (9 : Rat) / 10 &&
           ra₁.purityDrop < (9 : Rat) / 10 && (9 : Rat) / 10 ≤ ra₂.purityDrop then
         dilutionDetected := true
   if dilutionDetected then
-    alerts := alerts ++ ["UNCLASSIFIED_DILUTION_ALERT: Coarser-rank chimerism (drop-purity <90%) is masked to ≥90% at a finer rank by dropping unclassified contigs; inspect [purityCons, purityOpt] sandwich interval."]
+    alerts := alerts ++ ["UNCLASSIFIED_DILUTION_ALERT: Coarser-rank chimerism (opt/drop purity <90%) is masked to ≥90% drop-purity at a finer rank by dropping unclassified contigs; inspect [purityCons, purityOpt] sandwich interval."]
   if ev.markerSets.length < 50 then
     alerts := alerts ++ [s!"LOW_MARKER_RESOLUTION: Only {ev.markerSets.length} collocated marker sets; independent-set ≥95% Hoeffding radius is ±{formatPercent rad95}."]
   return {
@@ -380,8 +392,10 @@ def auditMAG (ev : MAGEvidence) (prov : ReportProvenance := {}) (cfg : AuditConf
     strainHeterogeneity := sh
     nonStrainContamination := nsc
     compositeScoreQ5 := q5
+    worstOptimisticPurity := worstOptimisticPurity
+    purityGatedQ5 := gatedQ5
+    stealthChimeraAlert := stealthFlag
     hoeffding95Radius := rad95
-    contigHoeffding95Radius := contigRad95
     speciesConservativeImpurity := speciesImpurity
     mimagTier := tier
     taxCoherent := coherent
@@ -528,6 +542,17 @@ def renderReport (cert : MAGCertificate) (showCI : Bool := false) : String :=
       [s!"  Hoeffding ≥95% CI  : [{formatPercent ciLo}, {formatPercent ciHi}]  (radius ±{formatPercent cert.hoeffding95Radius}; conditional on independent marker-set detections)"]
     else
       [s!"  Marker-Set CI      : omitted by default (pass --ci to print conditional independent-set Hoeffding radius ±{formatPercent cert.hoeffding95Radius})"]
+  let mimagLine :=
+    if cert.stealthChimeraAlert then
+      s!"  MIMAG Tier         : {cert.mimagTier.label}  [WARNING: STEALTH_CHIMERA_ALERT — see Purity-Gated Q_5]"
+    else
+      s!"  MIMAG Tier         : {cert.mimagTier.label}"
+  let gatedLine :=
+    match cert.purityGatedQ5 with
+    | some q =>
+      s!"  Purity-Gated Q_5   : {formatPercent q} (PASS; worst opt. purity {formatPercent cert.worstOptimisticPurity} ≥ 90% at rank ≤ {cert.config.maxChimeraRank.label})"
+    | none =>
+      s!"  Purity-Gated Q_5   : REJECTED (none; worst opt. purity {formatPercent cert.worstOptimisticPurity} < 90% at rank ≤ {cert.config.maxChimeraRank.label})"
   let header := [
     "========================================================================",
     s!"MAGLean QC Report: {cert.magId}",
@@ -545,12 +570,12 @@ def renderReport (cert : MAGCertificate) (showCI : Bool := false) : String :=
     s!"  Total Marker Mass  : {formatPercent cert.markerMass}  (exact: {formatRat cert.markerMass}) [Comp + Cont conserved]",
     s!"  Split Ceiling      : Combined completeness of any split ≤ {formatPercent cert.markerMass}",
     s!"  Strain Heterogen.  : {formatPercent cert.strainHeterogeneity}  (heuristic cont*(1-SH): {formatPercent cert.nonStrainContamination}; exact only for ≤2 copies/marker)",
-    s!"  Composite Q_5      : {formatPercent cert.compositeScoreQ5}  (exact: {formatRat cert.compositeScoreQ5})",
-    s!"  Contig-Level Rad.  : ±{formatPercent cert.contigHoeffding95Radius}  ({cert.markerBearingContigs} marker-bearing contigs; assumes equal-weight independent contigs)"
+    s!"  Composite Q_5      : {formatPercent cert.compositeScoreQ5}  (exact: {formatRat cert.compositeScoreQ5})"
   ] ++ ciLines ++ [
     "------------------------------------------------------------------------",
     "VERIFIED STANDARDS & COHERENCE",
-    s!"  MIMAG Tier         : {cert.mimagTier.label}",
+    mimagLine,
+    gatedLine,
     s!"  Tree Coherence     : {if cert.taxCoherent then "CERTIFIED (kCheckTaxCoherent_sound → TaxCoherent & rank-refinement monotonicity)" else "FAILED (violates prefix-closedness or tree consistency)"}",
     "------------------------------------------------------------------------",
     "TAXONOMIC RANK PURITY & CHIMERISM AUDIT (Conservative / Optimistic / Drop)"
@@ -589,9 +614,12 @@ def renderJson (cert : MAGCertificate) : Json :=
     ("strain_heterogeneity_exact", Json.str (formatRat cert.strainHeterogeneity)),
     ("non_strain_cont_heuristic_exact", Json.str (formatRat cert.nonStrainContamination)),
     ("composite_q5_exact", Json.str (formatRat cert.compositeScoreQ5)),
+    ("worst_optimistic_purity_exact", Json.str (formatRat cert.worstOptimisticPurity)),
+    ("purity_gate_passed", Json.bool cert.purityGatedQ5.isSome),
+    ("purity_gated_q5_exact", match cert.purityGatedQ5 with | some q => Json.str (formatRat q) | none => Json.null),
+    ("stealth_chimera_alert", Json.bool cert.stealthChimeraAlert),
     ("hoeffding_95_radius_exact", Json.str (formatRat cert.hoeffding95Radius)),
     ("hoeffding_95_assumptions", Json.str "conditional on independent [0,1]-bounded marker-set detections"),
-    ("contig_hoeffding_95_radius_exact", Json.str (formatRat cert.contigHoeffding95Radius)),
     ("species_conservative_impurity_exact", Json.str (formatRat cert.speciesConservativeImpurity)),
     ("max_chimera_rank", Json.str cert.config.maxChimeraRank.label),
     ("min_classified_frac_exact", Json.str (formatRat cert.config.minClassifiedFrac)),

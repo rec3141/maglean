@@ -1,20 +1,7 @@
-import Lean
 import MAGLean.Kernel
+import MAGLean.BuildInfo
 
 open MAGLean.Kernel
-open Lean Elab Term
-
-/-- Bake the current git commit hash into the executable at compile time
-(falling back to `"unknown"` if compiled outside a git working tree). -/
-elab "gitCommitHash%" : term => do
-  let hash ← try
-    let out ← IO.Process.output { cmd := "git", args := #["rev-parse", "--short=12", "HEAD"] }
-    if out.exitCode == 0 then pure out.stdout.trimAscii.toString else pure "unknown"
-  catch _ =>
-    pure "unknown"
-  return mkStrLit hash
-
-def buildGitCommit : String := gitCommitHash%
 
 def usage : String :=
   "MAGLean — Quality Control Auditor for Metagenome-Assembled Genomes\n\n" ++
@@ -24,7 +11,7 @@ def usage : String :=
   "  --json                        Emit machine-readable JSON report(s)\n" ++
   "  --ci                          Include conditional independent-marker-set Hoeffding CI in text reports\n" ++
   "  --max-chimera-rank <rank>     Finest rank checked for STEALTH_CHIMERA_ALERT (default: genus)\n" ++
-  "  --min-classified-pct <0..100> Minimum classified bp % for STEALTH_CHIMERA_ALERT (default: 50)\n" ++
+  "  --min-classified-pct <0..100> Minimum classified bp % for taxonomic alerts (default: 50)\n" ++
   "  --help                        Show this usage message\n"
 
 def processFile (jsonMode showCI : Bool) (cfg : AuditConfig) (path : System.FilePath) : IO UInt32 := do
@@ -42,7 +29,7 @@ def processFile (jsonMode showCI : Bool) (cfg : AuditConfig) (path : System.File
   let prov : ReportProvenance := {
     inputSha256 := sha
     magleanVersion := magleanVersion
-    gitCommit := buildGitCommit
+    gitCommit := MAGLean.BuildInfo.gitCommit
     leanToolchain := Lean.versionString
   }
   match parseMAGEvidence text with

@@ -400,6 +400,12 @@ theorem kStrainHeterogeneity_eq (h t : ℕ) :
 theorem kNonStrainCont_eq (cont sh : ℚ) :
     kNonStrainCont cont sh = nonStrainContamination cont sh := rfl
 
+/-- **Exact Purity-Gated Score Bridge**: `Kernel.kPurityGatedScore` equals
+`Quality.purityGatedScore` identically. -/
+theorem kPurityGatedScore_eq_purityGatedScore (pen τ_p comp cont purity : ℚ) :
+    kPurityGatedScore pen τ_p comp cont purity =
+      Quality.purityGatedScore pen τ_p comp cont purity := rfl
+
 /-! ### Bridge Theorem: Executable `Kernel.kCheckTaxCoherent` → `Taxonomy.TaxCoherent` -/
 
 /-- **Direct Soundness of the Executable Tree-Coherence Checker (`Kernel.kCheckTaxCoherent`)**:

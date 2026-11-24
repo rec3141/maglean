@@ -404,6 +404,285 @@ def test_cami_alert_calibration():
     print("PASS: test_cami_alert_calibration")
 
 
+def test_dilution_alert_small_denominator_gates():
+    """Regression tests for Issue #14: both small-denominator dilution fixtures."""
+    with tempfile.TemporaryDirectory() as tmp:
+        # Fixture 1: 3.99 Mb family-only + 5 kb E. coli (species) + 5 kb Salmonella (genus)
+        # Classified bp is 0.25% at genus and 0.125% at species => must NOT fire dilution alert.
+        markers_60 = [[f"PF{i:05d}"] for i in range(1, 61)]
+        f1 = {
+            "mag_id": "Issue14_Tiny_Genus_And_Species",
+            "lineage": "d__Bacteria",
+            "marker_sets": markers_60,
+            "rna": {"has_23S": True, "has_16S": True, "has_5S": True, "distinct_tRNAs": 20},
+            "contigs": [
+                {
+                    "id": "main", "length": 3990000, "markers": [f"PF{i:05d}" for i in range(1, 61)],
+                    "taxonomy": {
+                        "domain": "Bacteria", "phylum": "Pseudomonadota",
+                        "class": "Gammaproteobacteria", "order": "Enterobacterales",
+                        "family": "Enterobacteriaceae",
+                    },
+                },
+                {
+                    "id": "ecoli_5k", "length": 5000, "markers": [],
+                    "taxonomy": {
+                        "domain": "Bacteria", "phylum": "Pseudomonadota",
+                        "class": "Gammaproteobacteria", "order": "Enterobacterales",
+                        "family": "Enterobacteriaceae", "genus": "Escherichia",
+                        "species": "Escherichia coli",
+                    },
+                },
+                {
+                    "id": "salm_5k", "length": 5000, "markers": [],
+                    "taxonomy": {
+                        "domain": "Bacteria", "phylum": "Pseudomonadota",
+                        "class": "Gammaproteobacteria", "order": "Enterobacterales",
+                        "family": "Enterobacteriaceae", "genus": "Salmonella",
+                    },
+                },
+            ],
+        }
+        p1 = Path(tmp) / "issue14_1.json"
+        p1.write_text(json.dumps(f1), encoding="utf-8")
+        r1 = run_cli("--json", str(p1))
+        assert r1.returncode == 0, r1.stderr
+        d1 = json.loads(r1.stdout)
+        assert not any("UNCLASSIFIED_DILUTION_ALERT" in a for a in d1["alerts"]), d1["alerts"]
+
+        # Fixture 2: genus passes coverage gate (100% classified, 50/50 split across two genera),
+        # but only one tiny 5 kb contig reaches species (0.25% classified at species) => must NOT fire!
+        f2 = {
+            "mag_id": "Issue14_Genus_Covered_Species_Tiny",
+            "lineage": "d__Bacteria",
+            "marker_sets": markers_60,
+            "rna": {"has_23S": True, "has_16S": True, "has_5S": True, "distinct_tRNAs": 20},
+            "contigs": [
+                {
+                    "id": "g1_big", "length": 995000, "markers": [f"PF{i:05d}" for i in range(1, 31)],
+                    "taxonomy": {
+                        "domain": "Bacteria", "phylum": "Pseudomonadota",
+                        "class": "Gammaproteobacteria", "order": "Enterobacterales",
+                        "family": "Enterobacteriaceae", "genus": "Escherichia",
+                    },
+                },
+                {
+                    "id": "g1_tiny_sp", "length": 5000, "markers": [],
+                    "taxonomy": {
+                        "domain": "Bacteria", "phylum": "Pseudomonadota",
+                        "class": "Gammaproteobacteria", "order": "Enterobacterales",
+                        "family": "Enterobacteriaceae", "genus": "Escherichia",
+                        "species": "Escherichia coli",
+                    },
+                },
+                {
+                    "id": "g2_big", "length": 1000000, "markers": [f"PF{i:05d}" for i in range(31, 61)],
+                    "taxonomy": {
+                        "domain": "Bacteria", "phylum": "Pseudomonadota",
+                        "class": "Gammaproteobacteria", "order": "Enterobacterales",
+                        "family": "Enterobacteriaceae", "genus": "Salmonella",
+                    },
+                },
+            ],
+        }
+        p2 = Path(tmp) / "issue14_2.json"
+        p2.write_text(json.dumps(f2), encoding="utf-8")
+        r2 = run_cli("--json", str(p2))
+        assert r2.returncode == 0, r2.stderr
+        d2 = json.loads(r2.stdout)
+        assert not any("UNCLASSIFIED_DILUTION_ALERT" in a for a in d2["alerts"]), d2["alerts"]
+    print("PASS: test_dilution_alert_small_denominator_gates")
+
+
+def test_no_contig_radius_on_fragmentation():
+    """Regression test for Issue #13: paired 1-contig vs 60-contig identical 4 Mb genome."""
+    with tempfile.TemporaryDirectory() as tmp:
+        markers_60 = [[f"PF{i:05d}"] for i in range(1, 61)]
+        tax = {
+            "domain": "Bacteria", "phylum": "Pseudomonadota",
+            "class": "Gammaproteobacteria", "order": "Enterobacterales",
+            "family": "Enterobacteriaceae", "genus": "Escherichia",
+            "species": "Escherichia coli",
+        }
+        one = {
+            "mag_id": "Frag_1_Contig", "lineage": "d__Bacteria",
+            "marker_sets": markers_60,
+            "rna": {"has_23S": True, "has_16S": True, "has_5S": True, "distinct_tRNAs": 20},
+            "contigs": [{"id": "c1", "length": 4000000, "markers": [f"PF{i:05d}" for i in range(1, 61)], "taxonomy": tax}],
+        }
+        sixty = {
+            "mag_id": "Frag_60_Contigs", "lineage": "d__Bacteria",
+            "marker_sets": markers_60,
+            "rna": {"has_23S": True, "has_16S": True, "has_5S": True, "distinct_tRNAs": 20},
+            "contigs": [
+                {"id": f"c{i}", "length": 66666, "markers": [f"PF{i:05d}"], "taxonomy": tax}
+                for i in range(1, 61)
+            ],
+        }
+        p1, p60 = Path(tmp) / "one.json", Path(tmp) / "sixty.json"
+        p1.write_text(json.dumps(one), encoding="utf-8")
+        p60.write_text(json.dumps(sixty), encoding="utf-8")
+        for p in (p1, p60):
+            rt = run_cli(str(p))
+            assert rt.returncode == 0, rt.stderr
+            assert "Contig-Level Rad." not in rt.stdout
+            rj = run_cli("--json", str(p))
+            dj = json.loads(rj.stdout)
+            assert "contig_hoeffding_95_radius_exact" not in dj
+    print("PASS: test_no_contig_radius_on_fragmentation")
+
+
+def test_purity_gated_verdict_on_yeast_chimera():
+    """Regression test for Issue #15: E. coli + Cryptococcus chimera (HQ markers, 20.9% foreign bp)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        markers = [[f"PF{i:05d}"] for i in range(1, 21)]
+        chim = {
+            "mag_id": "Zymo_Ecoli_Plus_Cryptococcus",
+            "lineage": "d__Bacteria;g__Escherichia",
+            "marker_sets": markers,
+            "rna": {"has_23S": True, "has_16S": True, "has_5S": True, "distinct_tRNAs": 20},
+            "contigs": [
+                {
+                    "id": "ecoli_chr", "length": 4750000, "markers": [f"PF{i:05d}" for i in range(1, 20)],
+                    "taxonomy": {
+                        "domain": "Bacteria", "phylum": "Pseudomonadota",
+                        "class": "Gammaproteobacteria", "order": "Enterobacterales",
+                        "family": "Enterobacteriaceae", "genus": "Escherichia",
+                        "species": "Escherichia coli",
+                    },
+                },
+                {
+                    "id": "yeast_c1", "length": 1260000, "markers": [],
+                    "taxonomy": {
+                        "domain": "Eukaryota", "phylum": "Basidiomycota",
+                        "class": "Tremellomycetes", "order": "Tremellales",
+                        "family": "Cryptococcaceae", "genus": "Cryptococcus",
+                        "species": "Cryptococcus neoformans",
+                    },
+                },
+            ],
+        }
+        p = Path(tmp) / "yeast_chim.json"
+        p.write_text(json.dumps(chim), encoding="utf-8")
+        rj = run_cli("--json", str(p))
+        assert rj.returncode == 0, rj.stderr
+        dj = json.loads(rj.stdout)
+        assert dj["mimag_tier"] == "High-Quality (MIMAG HQ)"
+        assert dj["stealth_chimera_alert"] is True
+        assert dj["purity_gate_passed"] is False
+        assert dj["purity_gated_q5_exact"] is None
+        rt = run_cli(str(p))
+        assert "[WARNING: STEALTH_CHIMERA_ALERT" in rt.stdout
+        assert "Purity-Gated Q_5   : REJECTED" in rt.stdout
+    print("PASS: test_purity_gated_verdict_on_yeast_chimera")
+
+
+def test_converter_merged_orfs_and_format_fixes():
+    """Regression tests for Issues #11 and #12."""
+    with tempfile.TemporaryDirectory() as tmp:
+        t = Path(tmp)
+        (t / "contigs.tsv").write_text("contig_id\tlength\ncontig_001\t2000000\n", encoding="utf-8")
+        (t / "markers.tsv").write_text("PF00177\nPF00297\n", encoding="utf-8")
+        # Merged adjacent ORF key with TWO intervals for PF00177 (Issue #11 + #12.1)
+        # plus an extra contig_999 for --filter-to-bin testing (Issue #12.6)
+        (t / "checkm.tsv").write_text(
+            "bin1\t{'contig_001_7202&&contig_001_7203': {'PF00177': [[1, 80], [120, 200]]}, "
+            "'contig_001_10': {'PF00297': [[5, 95]]}, "
+            "'contig_999_1': {'PF00297': [[1, 50]]}}\n",
+            encoding="utf-8",
+        )
+        (t / "tax.tsv").write_text(
+            "contig_id\tlineage\n"
+            "contig_001\td__Bacteria;p__Pseudomonadota;g__Escherichia\n"
+            "contig_999\td__Bacteria;p__Bacillota\n",
+            encoding="utf-8",
+        )
+        # Barrnap GFF with eukaryotic 28S/18S/5_8S/12S (Issue #12.2), partial 16S (Issue #12.3),
+        # complete 23S and 5S, plus extra contig_999
+        (t / "barrnap.gff").write_text(
+            "##gff-version 3\n"
+            "contig_001\tbarrnap:0.9\trRNA\t1\t500\t0\t+\t.\tName=16S_rRNA;product=16S ribosomal RNA (partial)\n"
+            "contig_001\tbarrnap:0.9\trRNA\t600\t3500\t0\t+\t.\tName=23S_rRNA;product=23S ribosomal RNA\n"
+            "contig_001\tbarrnap:0.9\trRNA\t3600\t3720\t0\t+\t.\tName=5S_rRNA;product=5S ribosomal RNA\n"
+            "contig_001\tbarrnap:0.9\trRNA\t4000\t5800\t0\t+\t.\tName=18S_rRNA;product=18S ribosomal RNA\n"
+            "contig_001\tbarrnap:0.9\trRNA\t6000\t9000\t0\t+\t.\tName=28S_rRNA;product=28S ribosomal RNA\n"
+            "contig_001\tbarrnap:0.9\trRNA\t9100\t9250\t0\t+\t.\tName=5_8S_rRNA;product=5.8S ribosomal RNA\n"
+            "contig_001\tbarrnap:0.9\trRNA\t9300\t10200\t0\t+\t.\tName=12S_rRNA;product=12S ribosomal RNA\n"
+            "contig_999\tbarrnap:0.9\trRNA\t1\t1500\t0\t+\t.\tName=16S_rRNA;product=16S ribosomal RNA\n",
+            encoding="utf-8",
+        )
+        # tRNAscan-SE 12-column -H/--detail layout with pseudo in col 12 (Issue #12.4)
+        # and SeC(p)/SeC(e) (Issue #12.5)
+        (t / "trnascan.tsv").write_text(
+            "Sequence\ttRNA #\tBegin\tEnd\ttRNA Type\tAnti Codon\tIntron Begin\tIntron End\tInf Score\tHMM\t2Str\tNote\n"
+            "contig_001\t1\t10\t85\tAla\tTGC\t0\t0\t80.0\t70.0\t10.0\t\n"
+            "contig_001\t2\t100\t175\tGly\tGCC\t0\t0\t30.0\t20.0\t10.0\tpseudo\n"
+            "contig_001\t3\t200\t290\tSeC(p)\tTCA\t0\t0\t55.0\t45.0\t10.0\t\n"
+            "contig_001\t4\t300\t390\tSeC(e)\tTCA\t0\t0\t54.0\t44.0\t10.0\t\n"
+            "contig_999\t1\t10\t85\tVal\tTAC\t0\t0\t80.0\t70.0\t10.0\t\n",
+            encoding="utf-8",
+        )
+        out = t / "out.json"
+        # Without --filter-to-bin, extra contig_999 must be strictly rejected
+        strict = run_converter(
+            "--mag-id", "test", "--contigs", str(t / "contigs.tsv"),
+            "--marker-sets", str(t / "markers.tsv"), "--checkm-hits", str(t / "checkm.tsv"),
+            "--taxonomy", str(t / "tax.tsv"), "--barrnap", str(t / "barrnap.gff"),
+            "--trnascan", str(t / "trnascan.tsv"), "-o", str(out),
+        )
+        assert strict.returncode == 2
+
+        # With --filter-to-bin, conversion succeeds cleanly
+        ok = run_converter(
+            "--filter-to-bin",
+            "--mag-id", "test_merged", "--contigs", str(t / "contigs.tsv"),
+            "--marker-sets", str(t / "markers.tsv"), "--checkm-hits", str(t / "checkm.tsv"),
+            "--taxonomy", str(t / "tax.tsv"), "--barrnap", str(t / "barrnap.gff"),
+            "--trnascan", str(t / "trnascan.tsv"), "-o", str(out),
+        )
+        assert ok.returncode == 0, ok.stderr
+        ev = json.loads(out.read_text(encoding="utf-8"))
+        # Merged ORF with 2 intervals => exactly 2 copies of PF00177 + 1 copy of PF00297!
+        assert ev["contigs"][0]["markers"].count("PF00177") == 2
+        assert ev["contigs"][0]["markers"].count("PF00297") == 1
+        # Partial 16S excluded; 23S & 5S present; 12-col pseudo Gly excluded; SeC(p)/SeC(e) ignored => 1 AA (Ala)
+        assert ev["rna"]["has_16S"] is False
+        assert ev["rna"]["has_23S"] is True
+        assert ev["rna"]["has_5S"] is True
+        assert ev["rna"]["distinct_tRNAs"] == 1
+
+        # Verify MAGLean computes 100% completeness and 50% contamination (1 excess out of 2 sets)
+        rj = run_cli("--json", str(out))
+        assert rj.returncode == 0, rj.stderr
+        dj = json.loads(rj.stdout)
+        assert parse_frac(dj["completeness_exact"]) == Fraction(1)
+        assert parse_frac(dj["contamination_exact"]) == Fraction(1, 2)
+
+        # With --allow-partial-rrna, partial 16S is counted
+        ok_p = run_converter(
+            "--filter-to-bin", "--allow-partial-rrna",
+            "--mag-id", "test_partial", "--contigs", str(t / "contigs.tsv"),
+            "--marker-sets", str(t / "markers.tsv"), "--checkm-hits", str(t / "checkm.tsv"),
+            "--taxonomy", str(t / "tax.tsv"), "--barrnap", str(t / "barrnap.gff"),
+            "--trnascan", str(t / "trnascan.tsv"), "-o", str(out),
+        )
+        assert ok_p.returncode == 0, ok_p.stderr
+        assert json.loads(out.read_text(encoding="utf-8"))["rna"]["has_16S"] is True
+
+        # Cross-contig merged ORF key must be rejected!
+        (t / "contigs2.tsv").write_text("contig_id\tlength\nc1\t1000\nc2\t1000\n", encoding="utf-8")
+        (t / "bad_merge.tsv").write_text("bin1\t{'c1_1&&c2_2': {'PF00177': [[1, 50]]}}\n", encoding="utf-8")
+        bad_m = run_converter(
+            "--mag-id", "badm", "--contigs", str(t / "contigs2.tsv"),
+            "--marker-sets", str(t / "markers.tsv"), "--checkm-hits", str(t / "bad_merge.tsv"),
+            "--taxonomy", str(t / "tax.tsv"), "--barrnap", str(t / "barrnap.gff"),
+            "--trnascan", str(t / "trnascan.tsv"),
+        )
+        assert bad_m.returncode == 2
+        assert "spans multiple contigs" in bad_m.stderr
+    print("PASS: test_converter_merged_orfs_and_format_fixes")
+
+
 if __name__ == "__main__":
     if not BIN.exists():
         sys.exit(f"Binary not found: {BIN}")
@@ -422,4 +701,8 @@ if __name__ == "__main__":
     test_converter_real_uba_mag()
     test_converter_strict_rejections()
     test_cami_alert_calibration()
-    print("\nALL 15 CLI, CAMI CALIBRATION & CONVERTER TESTS PASSED!")
+    test_dilution_alert_small_denominator_gates()
+    test_no_contig_radius_on_fragmentation()
+    test_purity_gated_verdict_on_yeast_chimera()
+    test_converter_merged_orfs_and_format_fixes()
+    print("\nALL 19 CLI, CAMI CALIBRATION, PROVENANCE & CONVERTER TESTS PASSED!")

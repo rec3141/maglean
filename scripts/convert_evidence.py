@@ -1,23 +1,27 @@
 #!/usr/bin/env python3
 """Strict converter from standard bioinformatics QC tool outputs to MAGLean JSON.
 
-NOTE: This converter is outside the formally verified Lean kernel. To prevent
-silent data corruption before verification, it rejects unknown taxonomy ranks,
-duplicate contig IDs, zero-length contigs, and any contig missing from the
-assembly/taxonomy tables instead of silently dropping records.
+NOTE: This converter is outside the formally verified Lean kernel. By default it
+rejects unknown taxonomy ranks, duplicate contig IDs, zero-length contigs, and any
+contig missing from the assembly/taxonomy tables instead of silently dropping records.
+Pass `--filter-to-bin` to filter assembly-wide tool outputs down to the contigs
+present in `--contigs`.
 
 Supported inputs:
   - Contigs: FASTA (.fa/.fna/.fasta) or 2-column TSV (contig_id<TAB>length)
   - Marker sets: TSV (one collocated set per line, comma-separated marker IDs)
     or JSON array of arrays
   - Marker hits: 2-column TSV (contig_id<TAB>marker_id) or CheckM
-    marker_gene_stats.tsv format
+    `storage/marker_gene_stats.tsv` (supports merged adjacent ORF keys `geneA&&geneB`
+    and multi-interval lists `[[ali_from, ali_to], ...]`)
   - Contig taxonomy: 2-column GTDB-style TSV (contig_id<TAB>d__...;p__...)
-    or 8-column headered TSV (contig_id, domain, phylum, class, order, family,
-    genus, species)
-  - rRNA calls: barrnap GFF3
-  - tRNA calls: tRNAscan-SE tabular output (counts distinct standard 20 amino-acid
-    isotypes per Bowers et al. 2017 MIMAG)
+    or headered TSV (contig_id, domain, phylum, class, order, family, genus, species)
+  - rRNA calls: barrnap GFF3 (recognizes bacterial 5S/16S/23S and ignores eukaryotic /
+    organellar 5.8S/12S/18S/28S; skips partial fragments unless `--allow-partial-rrna`)
+  - tRNA calls: tRNAscan-SE tabular output (8-col or 12-col `-H`/`--detail`; counts
+    distinct standard 20 amino-acid isotypes per Bowers et al. 2017 MIMAG, ignoring
+    pseudogenes across all trailing note columns and non-standard types including
+    `SeC`, `SeC(p)`, `SeC(e)`, `Sup`, `Undet`, `Pyl`)
 """
 
 from __future__ import annotations
@@ -46,9 +50,11 @@ STANDARD_20_AA = {
     "Leu", "Lys", "Met", "Phe", "Pro",
     "Ser", "Thr", "Trp", "Tyr", "Val",
 }
-# Standard initiator/elongator Met aliases emitted by tRNAscan-SE
+# Standard initiator/elongator Met and Ile aliases emitted by tRNAscan-SE
 TRNA_AA_ALIASES = {"iMet": "Met", "fMet": "Met", "Ile2": "Ile"}
-TRNA_NONSTANDARD_OK = {"SeC", "Sup", "Undet", "Pseudo", "Pyl"}
+TRNA_NONSTANDARD_OK = {"SeC", "SeC(p)", "SeC(e)", "Sup", "Undet", "Pseudo", "Pyl"}
+# Non-bacterial (eukaryotic / mitochondrial) rRNA prefixes recognized by barrnap
+NON_BACTERIAL_RRNA_PREFIXES = ("18S", "28S", "5_8S", "5.8S", "12S")
 
 
 class ConverterError(ValueError):
@@ -144,17 +150,66 @@ def parse_marker_sets(path: Path) -> List[List[str]]:
     return sets
 
 
+def resolve_orf_contig(
+    orf_id: str,
+    valid_contigs: Dict[str, int],
+    context: str,
+    filter_to_bin: bool = False,
+) -> Optional[str]:
+    """Resolve a Prodigal ORF ID or CheckM merged-ORF key (`geneA&&geneB`) to its contig."""
+    components = [p.strip() for p in orf_id.split("&&")]
+    if not components or any(not p for p in components):
+        raise ConverterError(f"{context}: malformed ORF key '{orf_id}'")
+
+    resolved = set()
+    for part in components:
+        if part in valid_contigs:
+            resolved.add(part)
+        elif "_" in part and part.rsplit("_", 1)[0] in valid_contigs:
+            resolved.add(part.rsplit("_", 1)[0])
+        else:
+            if filter_to_bin:
+                return None
+            raise ConverterError(
+                f"{context}: ORF/contig '{orf_id}' (part '{part}') not found in contigs table"
+            )
+    if len(resolved) != 1:
+        raise ConverterError(
+            f"{context}: merged ORF key '{orf_id}' spans multiple contigs: {sorted(resolved)}"
+        )
+    return next(iter(resolved))
+
+
+def count_checkm_marker_intervals(hit_value: object, context: str) -> int:
+    """Count marker copies in CheckM's `marker_gene_stats.tsv` value.
+
+    CheckM stores `markers[marker_id] = [[ali_from, ali_to], ...]` (a list of hit
+    intervals whose length is the copy count on that ORF/merged-ORF). Simplified
+    dict fixtures (`{'evalue': ...}` or `{}`) represent a single hit.
+    """
+    if isinstance(hit_value, list):
+        if len(hit_value) == 0:
+            raise ConverterError(f"{context}: empty hit interval list")
+        return len(hit_value)
+    if isinstance(hit_value, dict):
+        return 1
+    raise ConverterError(
+        f"{context}: expected list of alignment intervals or hit dict, got {type(hit_value).__name__}"
+    )
+
+
 def parse_marker_hits(
     path: Path,
     valid_contigs: Dict[str, int],
     bin_id: Optional[str] = None,
+    filter_to_bin: bool = False,
 ) -> Dict[str, List[str]]:
     hits: Dict[str, List[str]] = {cid: [] for cid in valid_contigs}
     lines = [ln.rstrip("\n") for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
     if not lines:
         return hits
 
-    # Detect CheckM marker_gene_stats.tsv: "<bin_id>\t{'gene_id': {'PF00177': {...}}, ...}"
+    # Detect CheckM marker_gene_stats.tsv: "<bin_id>\t{'gene_id': {'PF00177': [[...]], ...}, ...}"
     first_parts = lines[0].split("\t")
     if len(first_parts) == 2 and first_parts[1].lstrip().startswith("{"):
         matched_bin = False
@@ -175,19 +230,18 @@ def parse_marker_hits(
             if not isinstance(gene_map, dict):
                 raise ConverterError(f"{path}:{idx}: expected dict in column 2")
             for orf_id, markers in gene_map.items():
-                # Prodigal ORF IDs look like "<contig_id>_<orf_num>"
-                if orf_id in valid_contigs:
-                    cid = orf_id
-                elif "_" in orf_id and orf_id.rsplit("_", 1)[0] in valid_contigs:
-                    cid = orf_id.rsplit("_", 1)[0]
-                else:
-                    raise ConverterError(
-                        f"{path}:{idx}: ORF/contig '{orf_id}' not found in contigs table"
-                    )
+                cid = resolve_orf_contig(
+                    str(orf_id), valid_contigs, f"{path}:{idx}", filter_to_bin=filter_to_bin
+                )
+                if cid is None:
+                    continue
                 if not isinstance(markers, dict):
                     raise ConverterError(f"{path}:{idx}: expected marker dict for '{orf_id}'")
-                for marker_id in markers.keys():
-                    hits[cid].append(str(marker_id))
+                for marker_id, hit_val in markers.items():
+                    copies = count_checkm_marker_intervals(
+                        hit_val, f"{path}:{idx} ({orf_id}:{marker_id})"
+                    )
+                    hits[cid].extend([str(marker_id)] * copies)
         if bin_id is not None and not matched_bin:
             raise ConverterError(f"Bin '{bin_id}' not found in CheckM file {path}")
         return hits
@@ -205,6 +259,8 @@ def parse_marker_hits(
             )
         cid, marker = parts[0].strip(), parts[1].strip()
         if cid not in valid_contigs:
+            if filter_to_bin:
+                continue
             raise ConverterError(f"{path}:{idx}: contig '{cid}' missing from contigs table")
         if not marker:
             raise ConverterError(f"{path}:{idx}: empty marker ID")
@@ -233,7 +289,9 @@ def parse_gtdb_lineage(lineage: str, context: str) -> Dict[str, str]:
     return tax
 
 
-def parse_taxonomy(path: Path, valid_contigs: Dict[str, int]) -> Dict[str, Dict[str, str]]:
+def parse_taxonomy(
+    path: Path, valid_contigs: Dict[str, int], filter_to_bin: bool = False
+) -> Dict[str, Dict[str, str]]:
     lines = [ln.rstrip("\n") for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
     if not lines:
         raise ConverterError(f"Empty taxonomy file: {path}")
@@ -257,6 +315,8 @@ def parse_taxonomy(path: Path, valid_contigs: Dict[str, int]) -> Dict[str, Dict[
                 )
             cid = parts[0].strip()
             if cid not in valid_contigs:
+                if filter_to_bin:
+                    continue
                 raise ConverterError(f"{path}:{idx}: contig '{cid}' missing from contigs table")
             if cid in tax_by_contig:
                 raise ConverterError(f"{path}:{idx}: duplicate contig '{cid}' in taxonomy table")
@@ -279,6 +339,8 @@ def parse_taxonomy(path: Path, valid_contigs: Dict[str, int]) -> Dict[str, Dict[
                 )
             cid, lin = parts[0].strip(), parts[1].strip()
             if cid not in valid_contigs:
+                if filter_to_bin:
+                    continue
                 raise ConverterError(f"{path}:{idx}: contig '{cid}' missing from contigs table")
             if cid in tax_by_contig:
                 raise ConverterError(f"{path}:{idx}: duplicate contig '{cid}' in taxonomy table")
@@ -292,7 +354,12 @@ def parse_taxonomy(path: Path, valid_contigs: Dict[str, int]) -> Dict[str, Dict[
     return tax_by_contig
 
 
-def parse_barrnap_gff(path: Path, valid_contigs: Dict[str, int]) -> Tuple[bool, bool, bool]:
+def parse_barrnap_gff(
+    path: Path,
+    valid_contigs: Dict[str, int],
+    filter_to_bin: bool = False,
+    allow_partial_rrna: bool = False,
+) -> Tuple[bool, bool, bool]:
     has_23s = has_16s = has_5s = False
     for idx, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         ln = raw.strip()
@@ -303,6 +370,8 @@ def parse_barrnap_gff(path: Path, valid_contigs: Dict[str, int]) -> Tuple[bool, 
             raise ConverterError(f"{path}:{idx}: expected 9 GFF3 columns, got {len(parts)}")
         seqid, ftype, attrs = parts[0], parts[2], parts[8]
         if seqid not in valid_contigs:
+            if filter_to_bin:
+                continue
             raise ConverterError(f"{path}:{idx}: GFF3 seqid '{seqid}' missing from contigs table")
         if ftype != "rRNA":
             continue
@@ -310,6 +379,12 @@ def parse_barrnap_gff(path: Path, valid_contigs: Dict[str, int]) -> Tuple[bool, 
         if not m:
             raise ConverterError(f"{path}:{idx}: rRNA GFF3 record missing Name= attribute")
         name = m.group(1)
+        if name.startswith(NON_BACTERIAL_RRNA_PREFIXES):
+            # Valid eukaryotic / organellar rRNA call (e.g. barrnap --kingdom euk/mito);
+            # does not satisfy bacterial MIMAG 5S/16S/23S criteria.
+            continue
+        if not allow_partial_rrna and "(partial)" in attrs.lower():
+            continue
         if name.startswith("23S"):
             has_23s = True
         elif name.startswith("16S"):
@@ -321,7 +396,9 @@ def parse_barrnap_gff(path: Path, valid_contigs: Dict[str, int]) -> Tuple[bool, 
     return has_23s, has_16s, has_5s
 
 
-def parse_trnascan_tsv(path: Path, valid_contigs: Dict[str, int]) -> int:
+def parse_trnascan_tsv(
+    path: Path, valid_contigs: Dict[str, int], filter_to_bin: bool = False
+) -> int:
     aa_found = set()
     for idx, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         ln = raw.strip()
@@ -334,15 +411,18 @@ def parse_trnascan_tsv(path: Path, valid_contigs: Dict[str, int]) -> int:
             )
         seqid = parts[0].strip()
         if seqid not in valid_contigs:
+            if filter_to_bin:
+                continue
             raise ConverterError(f"{path}:{idx}: tRNA contig '{seqid}' missing from contigs table")
         aa = parts[4].strip()
-        note = parts[9].strip().lower() if len(parts) >= 10 else ""
-        if "pseudo" in note:
+        # Check all trailing note columns (handles both standard 10-col and `-H`/`--detail` 12-col layouts)
+        trailing = " ".join(p.strip().lower() for p in parts[9:])
+        if "pseudo" in trailing:
             continue
         aa_norm = TRNA_AA_ALIASES.get(aa, aa)
         if aa_norm in STANDARD_20_AA:
             aa_found.add(aa_norm)
-        elif aa_norm in TRNA_NONSTANDARD_OK:
+        elif aa_norm in TRNA_NONSTANDARD_OK or aa_norm.startswith("Sup("):
             continue
         else:
             raise ConverterError(f"{path}:{idx}: unrecognized tRNA isotype '{aa}'")
@@ -352,10 +432,19 @@ def parse_trnascan_tsv(path: Path, valid_contigs: Dict[str, int]) -> int:
 def build_evidence(args: argparse.Namespace) -> dict:
     contigs = parse_contigs(Path(args.contigs))
     marker_sets = parse_marker_sets(Path(args.marker_sets))
-    hits = parse_marker_hits(Path(args.checkm_hits), contigs, bin_id=args.bin_id)
-    tax = parse_taxonomy(Path(args.taxonomy), contigs)
-    has_23s, has_16s, has_5s = parse_barrnap_gff(Path(args.barrnap), contigs)
-    distinct_trnas = parse_trnascan_tsv(Path(args.trnascan), contigs)
+    hits = parse_marker_hits(
+        Path(args.checkm_hits), contigs, bin_id=args.bin_id, filter_to_bin=args.filter_to_bin
+    )
+    tax = parse_taxonomy(Path(args.taxonomy), contigs, filter_to_bin=args.filter_to_bin)
+    has_23s, has_16s, has_5s = parse_barrnap_gff(
+        Path(args.barrnap),
+        contigs,
+        filter_to_bin=args.filter_to_bin,
+        allow_partial_rrna=args.allow_partial_rrna,
+    )
+    distinct_trnas = parse_trnascan_tsv(
+        Path(args.trnascan), contigs, filter_to_bin=args.filter_to_bin
+    )
 
     high_id, total_mc = 0, 0
     if args.strain_pairs:
@@ -407,6 +496,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--barrnap", required=True, help="barrnap GFF3 rRNA annotations")
     parser.add_argument("--trnascan", required=True, help="tRNAscan-SE tabular output")
     parser.add_argument("--strain-pairs", default=None, help="Optional HIGH:TOTAL multi-copy pair counts")
+    parser.add_argument(
+        "--filter-to-bin",
+        action="store_true",
+        help="Ignore records in taxonomy/hits/barrnap/tRNAscan whose contig is not in --contigs (for assembly-wide tables)",
+    )
+    parser.add_argument(
+        "--allow-partial-rrna",
+        action="store_true",
+        help="Count barrnap '(partial)' rRNA annotations as present (excluded by default)",
+    )
     parser.add_argument("-o", "--output", default="-", help="Output JSON path (default: stdout)")
 
     args = parser.parse_args(argv)

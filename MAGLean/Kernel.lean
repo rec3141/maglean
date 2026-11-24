@@ -303,13 +303,15 @@ def auditMAG (ev : MAGEvidence) : Except String MAGCertificate := do
     alerts := alerts ++ ["TAXONOMIC_INCOHERENCE: Contig lineages violate tree consistency or prefix-closedness."]
   if (9 : Rat) / 10 < comp && cont < (1 : Rat) / 20 && !ev.rna.satisfiesHQ then
     alerts := alerts ++ ["MIMAG_HQ_RNA_DOWNGRADE: Marker metrics pass HQ (>90% comp, <5% cont) but RNA profile fails (23S/16S/5S + ≥18 tRNAs); downgraded to MQ."]
-  -- Purity among classified bp only: unclassified sequence is not evidence of a second
-  -- clade, and purityDrop < 1 requires at least two distinct classified taxa at the rank.
-  let worstClassifiedPurity : Rat :=
-    rankAudits.foldl (fun acc ra =>
-      if 0 < ra.purityDrop && ra.purityDrop < acc then ra.purityDrop else acc) (1 : Rat)
-  if cont < (1 : Rat) / 20 && worstClassifiedPurity < (9 : Rat) / 10 then
-    alerts := alerts ++ ["STEALTH_CHIMERA_ALERT: Low marker contamination (<5%) masks multi-clade taxonomic chimerism (purity among classified bp <90%)."]
+  -- Optimistic purity (unclassified bp credited to the dominant taxon): it falls below 90%
+  -- only when classified bp outside the dominant taxon exceed 10% of the bin, so neither
+  -- unclassified sequence nor a few kb of a second taxon at a sparse rank trigger the alert
+  -- (Taxonomy.purity_unclassified_sandwich: every completion of the unclassified contigs
+  -- then has purity < 90%).
+  let worstOptimisticPurity : Rat :=
+    rankAudits.foldl (fun acc ra => if ra.purityOpt < acc then ra.purityOpt else acc) (1 : Rat)
+  if cont < (1 : Rat) / 20 && worstOptimisticPurity < (9 : Rat) / 10 then
+    alerts := alerts ++ ["STEALTH_CHIMERA_ALERT: Low marker contamination (<5%) masks multi-clade taxonomic chimerism (>10% of bp classified outside the dominant taxon)."]
   let mut dilutionDetected := false
   for ra₁ in rankAudits do
     for ra₂ in rankAudits do

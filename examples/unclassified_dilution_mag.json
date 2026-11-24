@@ -1,0 +1,51 @@
+{
+  "mag_id": "MAG_003_Unclassified_Dilution",
+  "lineage": "d__Bacteria",
+  "marker_sets": [
+    ["PF00177"],
+    ["PF00297"],
+    ["PF00318"],
+    ["PF00380"],
+    ["PF00410"],
+    ["PF00411"],
+    ["PF00466"],
+    ["PF00572"],
+    ["PF00673"],
+    ["PF00687"]
+  ],
+  "rna": {
+    "has_23S": true,
+    "has_16S": true,
+    "has_5S": false,
+    "distinct_tRNAs": 17
+  },
+  "strain_heterogeneity": {
+    "high_identity_pairs": 0,
+    "total_multicopy_pairs": 0
+  },
+  "contigs": [
+    {
+      "id": "contig_classified_host",
+      "length": 500000,
+      "markers": ["PF00177", "PF00297", "PF00318", "PF00380", "PF00410"],
+      "taxonomy": {
+        "domain": "Bacteria",
+        "phylum": "Bacteroidota",
+        "class": "Bacteroidia",
+        "order": "Bacteroidales",
+        "family": "Bacteroidaceae",
+        "genus": "Bacteroides",
+        "species": "Bacteroides fragilis"
+      }
+    },
+    {
+      "id": "contig_unclassified_contaminant",
+      "length": 500000,
+      "markers": ["PF00411", "PF00466", "PF00572", "PF00673"],
+      "taxonomy": {
+        "domain": "Bacteria",
+        "phylum": "Actinomycetota"
+      }
+    }
+  ]
+}

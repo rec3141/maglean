@@ -1,0 +1,50 @@
+{
+  "mag_id": "MAG_004_Patescibacteria_Reduced",
+  "lineage": "d__Bacteria;p__Patescibacteria;c__Paceibacteria",
+  "marker_sets": [
+    ["PF00177"],
+    ["PF00297"],
+    ["PF00318"],
+    ["PF00380"],
+    ["PF00410"],
+    ["PF00411"],
+    ["PF00466"],
+    ["PF00572"],
+    ["PF00673"],
+    ["PF00687"]
+  ],
+  "rna": {
+    "has_23S": true,
+    "has_16S": true,
+    "has_5S": false,
+    "distinct_tRNAs": 18
+  },
+  "strain_heterogeneity": {
+    "high_identity_pairs": 0,
+    "total_multicopy_pairs": 0
+  },
+  "contigs": [
+    {
+      "id": "contig_cpr_1",
+      "length": 480000,
+      "markers": ["PF00177", "PF00297", "PF00318", "PF00380"],
+      "taxonomy": {
+        "domain": "Bacteria",
+        "phylum": "Patescibacteria",
+        "class": "Paceibacteria",
+        "order": "Paceibacterales"
+      }
+    },
+    {
+      "id": "contig_cpr_2",
+      "length": 310000,
+      "markers": ["PF00410", "PF00411", "PF00466"],
+      "taxonomy": {
+        "domain": "Bacteria",
+        "phylum": "Patescibacteria",
+        "class": "Paceibacteria",
+        "order": "Paceibacterales"
+      }
+    }
+  ]
+}

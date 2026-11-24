@@ -1,0 +1,56 @@
+{
+  "mag_id": "MAG_002_Stealth_Chimera",
+  "lineage": "d__Bacteria",
+  "marker_sets": [
+    ["PF00177", "PF00181"],
+    ["PF00297"],
+    ["PF00318"],
+    ["PF00380"],
+    ["PF00410"],
+    ["PF00411"],
+    ["PF00466"],
+    ["PF00572"],
+    ["PF00673"],
+    ["PF00687"]
+  ],
+  "rna": {
+    "has_23S": true,
+    "has_16S": true,
+    "has_5S": true,
+    "distinct_tRNAs": 19
+  },
+  "strain_heterogeneity": {
+    "high_identity_pairs": 0,
+    "total_multicopy_pairs": 0
+  },
+  "contigs": [
+    {
+      "id": "contig_proto_1",
+      "length": 1200000,
+      "markers": ["PF00177", "PF00181", "PF00297", "PF00318", "PF00380", "PF00410"],
+      "taxonomy": {
+        "domain": "Bacteria",
+        "phylum": "Pseudomonadota",
+        "class": "Gammaproteobacteria",
+        "order": "Pseudomonadales",
+        "family": "Pseudomonadaceae",
+        "genus": "Pseudomonas",
+        "species": "Pseudomonas putida"
+      }
+    },
+    {
+      "id": "contig_bacil_1",
+      "length": 1200000,
+      "markers": ["PF00411", "PF00466", "PF00572", "PF00673", "PF00687"],
+      "taxonomy": {
+        "domain": "Bacteria",
+        "phylum": "Bacillota",
+        "class": "Bacilli",
+        "order": "Bacillales",
+        "family": "Bacillaceae",
+        "genus": "Bacillus",
+        "species": "Bacillus subtilis"
+      }
+    }
+  ]
+}

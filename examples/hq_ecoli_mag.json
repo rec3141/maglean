@@ -1,0 +1,94 @@
+{
+  "mag_id": "MAG_001_Ecoli_HQ",
+  "lineage": "d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia",
+  "marker_sets": [
+    ["PF00177", "PF00181"],
+    ["PF00297"],
+    ["PF00318"],
+    ["PF00380"],
+    ["PF00410"],
+    ["PF00411"],
+    ["PF00466"],
+    ["PF00572"],
+    ["PF00673"],
+    ["PF00687"],
+    ["PF00827"],
+    ["PF00831"],
+    ["PF01000"],
+    ["PF01196"],
+    ["PF01247"],
+    ["PF01280"],
+    ["PF01655"],
+    ["PF01795"],
+    ["PF03946"],
+    ["PF03947"]
+  ],
+  "rna": {
+    "has_23S": true,
+    "has_16S": true,
+    "has_5S": true,
+    "distinct_tRNAs": 20
+  },
+  "strain_heterogeneity": {
+    "high_identity_pairs": 0,
+    "total_multicopy_pairs": 0
+  },
+  "contigs": [
+    {
+      "id": "contig_001",
+      "length": 1850000,
+      "markers": ["PF00177", "PF00181", "PF00297", "PF00318", "PF00380", "PF00410", "PF00411"],
+      "taxonomy": {
+        "domain": "Bacteria",
+        "phylum": "Pseudomonadota",
+        "class": "Gammaproteobacteria",
+        "order": "Enterobacterales",
+        "family": "Enterobacteriaceae",
+        "genus": "Escherichia",
+        "species": "Escherichia coli"
+      }
+    },
+    {
+      "id": "contig_002",
+      "length": 1620000,
+      "markers": ["PF00466", "PF00572", "PF00673", "PF00687", "PF00827", "PF00831", "PF01000"],
+      "taxonomy": {
+        "domain": "Bacteria",
+        "phylum": "Pseudomonadota",
+        "class": "Gammaproteobacteria",
+        "order": "Enterobacterales",
+        "family": "Enterobacteriaceae",
+        "genus": "Escherichia",
+        "species": "Escherichia coli"
+      }
+    },
+    {
+      "id": "contig_003",
+      "length": 1150000,
+      "markers": ["PF01196", "PF01247", "PF01280", "PF01655", "PF01795", "PF03946", "PF03947"],
+      "taxonomy": {
+        "domain": "Bacteria",
+        "phylum": "Pseudomonadota",
+        "class": "Gammaproteobacteria",
+        "order": "Enterobacterales",
+        "family": "Enterobacteriaceae",
+        "genus": "Escherichia",
+        "species": "Escherichia coli"
+      }
+    },
+    {
+      "id": "contig_004_plasmid",
+      "length": 95000,
+      "markers": [],
+      "taxonomy": {
+        "domain": "Bacteria",
+        "phylum": "Pseudomonadota",
+        "class": "Gammaproteobacteria",
+        "order": "Enterobacterales",
+        "family": "Enterobacteriaceae",
+        "genus": "Escherichia",
+        "species": "Escherichia coli"
+      }
+    }
+  ]
+}

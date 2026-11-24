@@ -43,7 +43,7 @@ Rather than treating completeness, contamination, chimerism, taxonomic placement
 - **`rank_refinement_monotonicity`**: Under tree-coherent contig taxonomy (`TaxCoherent`), conservative purity is monotonically non-increasing (and chimerism non-decreasing) from Domain to Species.
 - **`purity_unclassified_sandwich`**: For *any* completion of unclassified contigs agreeing with existing contig calls, full-bin purity lies inside `[purityCons, purityOpt]`, with width equal to the unclassified bp fraction.
 - **`unclassified_dilution_counterexample`**: Explicit tree-coherent chimeric bin whose drop-unclassified purity jumps artificially from `50%` (Phylum) to `100%` (Genus).
-- **`taxonomic_catches_stealth_chimera`**: Merging two sub-bins uniformly labelled with distinct clades $t_1 \ne t_2$ at rank $r$ forces conservative purity $\frac{\max(W_1, W_2)}{W_1 + W_2} < 1$.
+- **`taxonomic_catches_stealth_chimera`**: Merging two disjoint sub-bins of positive total base-pair length ($W_1 > 0, W_2 > 0$) uniformly labelled with distinct clades $t_1 \ne t_2$ at rank $r$ forces conservative purity $\frac{\max(W_1, W_2)}{W_1 + W_2} < 1$.
 
 ### 4. MIMAG Standards & Composite Scores (`MAGLean/Quality.lean`)
 - **`mimag_partition_unique`**: Exact rational classification into four exhaustive, mutually exclusive tiers (`HQ`, `MQ`, `LQ`, `Contaminated`), matching the numerical completeness/contamination inequalities of Bowers et al. (2017) Table 1 and adding explicit `Cont ≥ 10%` (`Finished` and assembly-gap criteria are not modeled).
@@ -58,7 +58,7 @@ Rather than treating completeness, contamination, chimerism, taxonomic placement
 - **`derep_cluster_diameter_bound` & `derep_80_97_corollary`**: Under star clustering where members align to representative $S$ at `AF ≥ 80%` and `ANI ≥ 97%`, every pair shares `≥ 60%` of $S$ with `≥ 92%` core ANI (note that `dRep`'s default secondary clustering uses average linkage at `S_ani = 0.95` and `cov_thresh = 0.10`, which does not enforce `AF > 50%`).
 
 ### 6. Metagenome Binning & Verified Filtering (`MAGLean/Binning.lean`)
-- **`global_metagenome_marker_conservation`**: For a *single fixed* marker family $M$ and pre-counted per-contig hits, across any partition of assembly $A$ into bins $B_1, \dots, B_m$ plus unbinned contigs $U$, $\sum_b (\text{Comp}_M(B_b) + \text{Cont}_M(B_b)) + (\text{Comp}_M(U) + \text{Cont}_M(U)) = \text{Comp}_M(A) + \text{Cont}_M(A)$. This does not apply across `CheckM lineage_wf` outputs that choose a different lineage-specific marker family $M_b$ per bin, nor prior to CheckM's per-scaffold adjacent-ORF hit merging.
+- **`global_metagenome_marker_conservation`**: For a *single fixed* marker family $M$ and any fixed per-contig hit table, across any partition of assembly $A$ into bins $B_1, \dots, B_m$ plus unbinned contigs $U$, $\sum_b (\text{Comp}_M(B_b) + \text{Cont}_M(B_b)) + (\text{Comp}_M(U) + \text{Cont}_M(U)) = \text{Comp}_M(A) + \text{Cont}_M(A)$. This does not apply across `CheckM lineage_wf` outputs that choose a different lineage-specific marker family $M_b$ per bin, and matching CheckM's per-bin counts from raw ORF hits requires applying CheckM's per-scaffold adjacent-ORF merging consistently beforehand.
 - **`filterValidBins_sound`**: Verified QC-gated bin selector preserving strict contig disjointness and guaranteeing every retained bin meets `(minComp, maxCont, minPurity)`.
 
 ---

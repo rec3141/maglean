@@ -7,7 +7,11 @@ import Mathlib.Tactic
 # MAGLean.Dereplication
 
 Formal mathematical theory of Average Nucleotide Identity (ANI), Aligned Fraction (AF),
-and species-cluster dereplication guarantees (fastANI / dRep / GTDB).
+and star-cluster diameter bounds under a shared gapless reference coordinate model
+(`g : Locus → Base`, with `AF` measured relative to representative locus set `S`).
+Note that pairwise tools (`fastANI`, `skani`, `ANIm`) drop low-identity fragments and
+permit indels/paralogs, and `dRep`'s default secondary clustering (`S_ani = 0.95`,
+`cov_thresh = 0.10`, average linkage) does not enforce `AF > 50%`.
 
 ## Main Results
 

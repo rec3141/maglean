@@ -122,6 +122,48 @@ def test_text_reports_and_errors():
     print("PASS: test_text_reports_and_errors")
 
 
+REGRESSION = ROOT / "Tests" / "regression"
+
+
+def test_unclassified_is_not_chimerism():
+    # One taxon; species label on 10% of bp, rest unclassified at species.
+    res = run_cli("--json", str(REGRESSION / "unclassified_species_single_taxon.json"))
+    assert res.returncode == 0, res.stderr
+    data = json.loads(res.stdout)
+    assert not any("STEALTH_CHIMERA_ALERT" in a for a in data["alerts"]), data["alerts"]
+    print("PASS: test_unclassified_is_not_chimerism")
+
+
+def test_sparse_rank_second_taxon_is_not_chimerism():
+    # 3.99 Mb unclassified at genus/species; 5 kb E. coli and 5 kb Salmonella (Meridian).
+    res = run_cli("--json", str(REGRESSION / "sparse_rank_two_taxa.json"))
+    assert res.returncode == 0, res.stderr
+    data = json.loads(res.stdout)
+    assert not any("STEALTH_CHIMERA_ALERT" in a for a in data["alerts"]), data["alerts"]
+    print("PASS: test_sparse_rank_second_taxon_is_not_chimerism")
+
+
+def test_rejects_unknown_rank_key():
+    res = run_cli("--json", str(REGRESSION / "capitalised_rank_keys.json"))
+    assert res.returncode == 2, res.stdout
+    assert "Unknown taxonomy rank" in res.stderr
+    print("PASS: test_rejects_unknown_rank_key")
+
+
+def test_rejects_duplicate_marker_sets():
+    res = run_cli("--json", str(REGRESSION / "duplicate_marker_sets.json"))
+    assert res.returncode == 2, res.stdout
+    assert "duplicate marker sets" in res.stderr
+    print("PASS: test_rejects_duplicate_marker_sets")
+
+
+def test_rejects_zero_length_contig():
+    res = run_cli("--json", str(REGRESSION / "zero_length_contig.json"))
+    assert res.returncode == 2, res.stdout
+    assert "contig length must be positive" in res.stderr
+    print("PASS: test_rejects_zero_length_contig")
+
+
 if __name__ == "__main__":
     if not BIN.exists():
         sys.exit(f"Binary not found: {BIN}")
@@ -131,4 +173,9 @@ if __name__ == "__main__":
     test_patescibacteria_reduced()
     test_contaminated_mag()
     test_text_reports_and_errors()
+    test_unclassified_is_not_chimerism()
+    test_sparse_rank_second_taxon_is_not_chimerism()
+    test_rejects_unknown_rank_key()
+    test_rejects_duplicate_marker_sets()
+    test_rejects_zero_length_contig()
     print("\nALL CLI TESTS PASSED!")

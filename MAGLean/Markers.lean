@@ -541,7 +541,9 @@ theorem stealth_chimera_exists (M : MarkerFamily α) (hcard : 2 ≤ M.allMarkers
 
 /-! ### Contig-level lifting & Core-vs-Accessory Invariance -/
 
-/-- Aggregate marker copy counts of a finite bin of contigs. -/
+/-- Aggregate marker copy counts of a finite bin of contigs from pre-counted per-contig
+hits (note CheckM's `identifyAdjacentMarkerGenes` merges adjacent same-marker ORFs on a
+scaffold before counting). -/
 def binCounts {Contig : Type*} [DecidableEq Contig]
     (contigHits : Contig → α → ℕ) (B : Finset Contig) : α → ℕ :=
   fun g => ∑ c ∈ B, contigHits c g
@@ -596,8 +598,8 @@ theorem accessory_invariance {Contig : Type*} [DecidableEq Contig]
 /-! ### Strain Heterogeneity (CheckM-style) -/
 
 /-- Strain heterogeneity: fraction of multi-copy marker pairs whose amino-acid
-identity exceeds the strain threshold (e.g. ≥ 90% AAI). Returns `0` when there
-are no multi-copy pairs. -/
+identity exceeds the strain threshold (CheckM default: strict `> 90%` AAI). Returns `0`
+when there are no multi-copy pairs. -/
 def strainHeterogeneity (highIdentityPairs totalMultiCopyPairs : ℕ) : ℚ :=
   if totalMultiCopyPairs = 0 then 0
   else (highIdentityPairs : ℚ) / (totalMultiCopyPairs : ℚ)
@@ -616,7 +618,9 @@ theorem strainHeterogeneity_le_one {h t : ℕ} (hle : h ≤ t) :
     rw [div_le_one htpos]
     exact_mod_cast hle
 
-/-- Non-strain (inter-species) contamination estimate: `cont * (1 - SH)`. -/
+/-- Heuristic non-strain contamination rescaling `cont * (1 - SH)` (not a CheckM output;
+when markers have `≥ 3` copies, `SH` weights markers by pairs `n*(n-1)/2` whereas
+`contamination` weights excess copies linearly by `n - 1`). -/
 def nonStrainContamination (cont sh : ℚ) : ℚ := cont * (1 - sh)
 
 theorem nonStrainContamination_bounds {cont sh : ℚ}

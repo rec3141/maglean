@@ -3,11 +3,11 @@ import Lean.Data.Json
 /-!
 # MAGLean.Kernel
 
-Zero-Mathlib, fast-compiling executable proof-carrying MAG QC kernel.
+Zero-Mathlib, fast-compiling executable MAG QC kernel.
 
 All rational arithmetic uses Lean 4's exact `Rat` type (identical to Mathlib's `ℚ`),
 eliminating floating-point rounding drift around MIMAG / CheckM / GUNC cutoffs.
-Semantic equivalence and soundness proofs connecting every function in this kernel
+Theorems connecting some functions in this kernel
 to the Mathlib formal theory (`MAGLean.Markers`, `MAGLean.Probabilistic`,
 `MAGLean.Taxonomy`, `MAGLean.Quality`) live in `MAGLean.Certificate`.
 -/
@@ -110,7 +110,8 @@ structure RankAudit where
   dominantTaxon : Option String
   deriving Repr
 
-/-- Proof-carrying MAG audit certificate emitted by the verified kernel. -/
+/-- MAG audit report emitted by the kernel. Which fields have a bridge theorem in
+`MAGLean.Certificate` is listed in the README section "What a report attests". -/
 structure MAGCertificate where
   magId : String
   lineage : String
@@ -264,15 +265,25 @@ def kRankAudit (contigs : List ContigEvidence) (r : KTaxRank) : RankAudit :=
     unclassifiedFrac := uFrac
     dominantTaxon := domOpt }
 
-/-! ### Verified Audit Entrypoint -/
+/-! ### Audit Entrypoint
+
+The parser, `auditMAG`, `kRankAudit`, `kCheckTaxCoherent` and the alerts have no bridge
+theorem in `MAGLean.Certificate`. -/
 
 def auditMAG (ev : MAGEvidence) : Except String MAGCertificate := do
   if ev.markerSets.isEmpty then
     throw "Invalid evidence: marker_sets must be nonempty."
   if ev.markerSets.any (fun s => (dedupStrings s).isEmpty) then
     throw "Invalid evidence: every collocated marker set must be nonempty."
+  let canon : List String → List String := fun xs =>
+    (dedupStrings xs).mergeSort (fun a b => decide (a < b) || a == b)
+  let canonSets := ev.markerSets.map canon
+  if (canonSets.foldl (fun acc x => if acc.contains x then acc else acc ++ [x]) []).length != canonSets.length then
+    throw "Invalid evidence: duplicate marker sets; the confidence radius assumes each set is a separate observation."
   if ev.contigs.isEmpty then
     throw "Invalid evidence: bin must contain at least one contig."
+  if ev.contigs.any (fun c => c.length == 0) then
+    throw "Invalid evidence: contig length must be positive."
   let ids := ev.contigs.map (·.id)
   if (dedupStrings ids).length != ids.length then
     throw "Invalid evidence: duplicate contig IDs detected."
@@ -296,11 +307,15 @@ def auditMAG (ev : MAGEvidence) : Except String MAGCertificate := do
     alerts := alerts ++ ["TAXONOMIC_INCOHERENCE: Contig lineages violate tree consistency or prefix-closedness."]
   if (9 : Rat) / 10 < comp && cont < (1 : Rat) / 20 && !ev.rna.satisfiesHQ then
     alerts := alerts ++ ["MIMAG_HQ_RNA_DOWNGRADE: Marker metrics pass HQ (>90% comp, <5% cont) but RNA profile fails (23S/16S/5S + ≥18 tRNAs); downgraded to MQ."]
-  let worstClassifiedPurity : Rat :=
-    rankAudits.foldl (fun acc ra =>
-      if ra.unclassifiedFrac < 1 && ra.purityCons < acc then ra.purityCons else acc) (1 : Rat)
-  if cont < (1 : Rat) / 20 && worstClassifiedPurity < (9 : Rat) / 10 then
-    alerts := alerts ++ ["STEALTH_CHIMERA_ALERT: Low marker contamination (<5%) masks severe multi-clade taxonomic chimerism (conservative purity <90%)."]
+  -- Optimistic purity (unclassified bp credited to the dominant taxon): it falls below 90%
+  -- only when classified bp outside the dominant taxon exceed 10% of the bin, so neither
+  -- unclassified sequence nor a few kb of a second taxon at a sparse rank trigger the alert
+  -- (Taxonomy.purity_unclassified_sandwich: every completion of the unclassified contigs
+  -- then has purity < 90%).
+  let worstOptimisticPurity : Rat :=
+    rankAudits.foldl (fun acc ra => if ra.purityOpt < acc then ra.purityOpt else acc) (1 : Rat)
+  if cont < (1 : Rat) / 20 && worstOptimisticPurity < (9 : Rat) / 10 then
+    alerts := alerts ++ ["STEALTH_CHIMERA_ALERT: Low marker contamination (<5%) masks multi-clade taxonomic chimerism (>10% of bp classified outside the dominant taxon)."]
   let mut dilutionDetected := false
   for ra₁ in rankAudits do
     for ra₂ in rankAudits do
@@ -385,7 +400,7 @@ private def parseTaxonomyObj (j : Json) : Except String (List (KTaxRank × Strin
   | .obj kv =>
     kv.toList.foldlM (fun acc (k, v) =>
       match parseRankKey k with
-      | none => .ok acc
+      | none => .error s!"Unknown taxonomy rank '{k}'; expected one of domain, phylum, class, order, family, genus, species"
       | some r =>
         match v with
         | .str s => .ok (acc ++ [(r, s)])
@@ -468,7 +483,7 @@ def renderReport (cert : MAGCertificate) : String :=
   let ciHi := if (1 : Rat) < cert.completeness + cert.hoeffding95Radius then (1 : Rat) else cert.completeness + cert.hoeffding95Radius
   let header := [
     "========================================================================",
-    s!"MAGLean Proof-Carrying QC Certificate: {cert.magId}",
+    s!"MAGLean QC Report: {cert.magId}",
     "========================================================================",
     s!"Lineage              : {cert.lineage}",
     s!"Assembly Summary     : {cert.numContigs} contigs, {cert.totalBp} bp",
@@ -482,11 +497,11 @@ def renderReport (cert : MAGCertificate) : String :=
     s!"  Split Ceiling      : Combined completeness of any split ≤ {formatPercent cert.markerMass}",
     s!"  Strain Heterogen.  : {formatPercent cert.strainHeterogeneity}  (non-strain cont: {formatPercent cert.nonStrainContamination})",
     s!"  Composite Q_5      : {formatPercent cert.compositeScoreQ5}  (exact: {formatRat cert.compositeScoreQ5})",
-    s!"  Hoeffding ≥95% CI  : [{formatPercent ciLo}, {formatPercent ciHi}]  (radius ±{formatPercent cert.hoeffding95Radius})",
+    s!"  Hoeffding ≥95% CI  : [{formatPercent ciLo}, {formatPercent ciHi}]  (radius ±{formatPercent cert.hoeffding95Radius}; assumes independent marker sets)",
     "------------------------------------------------------------------------",
     "VERIFIED STANDARDS & COHERENCE",
     s!"  MIMAG Tier         : {cert.mimagTier.label}",
-    s!"  Tree Coherence     : {if cert.taxCoherent then "CERTIFIED (TaxCoherent → rank-refinement monotonicity holds)" else "FAILED (violates prefix-closedness or tree consistency)"}",
+    s!"  Tree Coherence     : {if cert.taxCoherent then "PASS (prefix-closed and tree-consistent; this checker has no bridge theorem)" else "FAILED (violates prefix-closedness or tree consistency)"}",
     "------------------------------------------------------------------------",
     "TAXONOMIC RANK PURITY & CHIMERISM AUDIT (Conservative / Optimistic / Drop)"
   ]

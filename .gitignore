@@ -5,3 +5,5 @@
 *.trace
 *.log
 __pycache__/
+.Rhistory
+README.html

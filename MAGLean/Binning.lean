@@ -9,16 +9,19 @@ of base pairs and marker mass, and a verified QC-gated bin-selection operator.
 
 ## Main Results
 
-* `binOf_disjoint`: Every binning assigns each contig to at most one bin (zero duplication).
+* `binOf_disjoint`: A `BinMap` is a function from contigs to an optional bin, so the contig
+  sets of distinct bins are disjoint. A bin table that lists a contig twice is not a `BinMap`;
+  rejecting such a table is the parser's job, not a consequence of this theorem.
 * `assembly_length_conservation`: Sum of binned lengths + unbinned length equals total
-  assembly length identically.
-* `global_metagenome_marker_conservation`: Across *any* binning of a metagenome assembly `A`
-  into bins `B₁, ..., Bₘ` plus unbinned contigs `U`,
+  assembly length.
+* `global_metagenome_marker_conservation`: For one marker family `M` applied to every bin,
+  and any binning of an assembly `A` into bins `B₁, ..., Bₘ` plus unbinned contigs `U`,
   `∑ b, (Comp(B_b) + Cont(B_b)) + (Comp(U) + Cont(U)) = Comp(A) + Cont(A)`.
-  No binner can create or destroy single-copy marker mass!
-* `filterValidBins_sound`: A verified QC-filtering operator (gating on completeness,
-  contamination, and taxonomic purity) preserves binning validity and guarantees every
-  retained bin meets all declared thresholds.
+  Both conservation results are instances of `sum_over_binning`: any additive per-contig
+  quantity sums over a partition. They do not cover per-bin scores computed with a
+  different marker family for each bin (as CheckM's lineage workflow does).
+* `filterValidBins_sound`: every bin retained by the QC filter (gating on completeness,
+  contamination, and taxonomic purity) meets the declared thresholds.
 -/
 
 namespace MAGLean.Binning
@@ -46,7 +49,8 @@ def activeBins (A : Finset Contig) (β : BinMap Contig BinId) : Finset BinId :=
   A.biUnion (fun c => (β c).toFinset)
 
 omit [DecidableEq Contig] in
-/-- **Zero-Duplication Invariant**: Distinct bins never share a contig. -/
+/-- **Zero-Duplication Invariant**: Distinct bins never share a contig. This holds because
+a `BinMap` is a function; it says nothing about a bin table that is not one. -/
 theorem binOf_disjoint (A : Finset Contig) (β : BinMap Contig BinId)
     {b₁ b₂ : BinId} (hne : b₁ ≠ b₂) :
     Disjoint (binOf A β b₁) (binOf A β b₂) := by
@@ -105,10 +109,12 @@ theorem assembly_length_conservation (A : Finset Contig) (β : BinMap Contig Bin
   exact sum_over_binning A β (fun c => (len c : ℚ))
 
 /-- **Global Metagenome Marker-Mass Conservation Law**:
-Across *any* binning of a metagenome assembly `A` into bins `B_b` plus unbinned contigs `U`,
-the sum of `completeness + contamination` over all bins and unbinned contigs equals
-`completeness(A) + contamination(A)` identically. No binner can create or destroy
-single-copy marker mass! -/
+For a single marker family `M` and per-contig hit counts `hits`, across any binning of an
+assembly `A` into bins `B_b` plus unbinned contigs `U`, the sum of
+`completeness + contamination` over all bins and the unbinned contigs equals
+`completeness(A) + contamination(A)`. The unbinned term is part of the identity: the bins
+alone can sum to less. The same `M` scores every bin and the whole assembly, so the identity
+does not apply to scores that use a lineage-specific marker family per bin. -/
 theorem global_metagenome_marker_conservation
     (M : MarkerFamily Marker) (A : Finset Contig) (β : BinMap Contig BinId)
     (hits : Contig → Marker → ℕ) :
@@ -143,7 +149,7 @@ def passesGate (M : MarkerFamily Marker) (hits : Contig → Marker → ℕ)
           contamination M (binCounts hits B) ≤ gate.maxCont ∧
           gate.minPurity ≤ purityCons B len τ gate.checkRank)
 
-/-- Verified QC-gated bin selector: retains a contig's bin assignment iff its bin
+/-- QC-gated bin selector: retains a contig's bin assignment iff its bin
 passes `gate`, otherwise releases the contig to `unbinned` (`none`). -/
 def filterValidBins (A : Finset Contig) (β : BinMap Contig BinId)
     (M : MarkerFamily Marker) (hits : Contig → Marker → ℕ)
@@ -179,10 +185,14 @@ lemma binOf_filterValidBins_of_pass (A : Finset Contig) (β : BinMap Contig BinI
     rw [hβ]
     simp [hpass]
 
-/-- **Soundness of Verified QC-Gated Bin Selection**:
-Every active bin produced by `filterValidBins` is guaranteed to satisfy the declared
-minimum completeness, maximum contamination, and minimum taxonomic purity thresholds,
-while preserving strict contig disjointness and global base-pair / marker-mass conservation. -/
+/-- **Soundness of QC-Gated Bin Selection**:
+Every active bin of `filterValidBins A β ...` satisfies the declared minimum completeness,
+maximum contamination, and minimum taxonomic purity thresholds. The gate is evaluated on the
+original bin; `binOf_filterValidBins_of_pass` shows a passing bin keeps exactly its contigs,
+so the thresholds hold for the filtered bin. Disjointness and base-pair / marker-mass
+conservation are not part of this statement: they hold for the filtered map as for any
+`BinMap`, by `binOf_disjoint`, `assembly_length_conservation` and
+`global_metagenome_marker_conservation`, with rejected bins counted in the unbinned term. -/
 theorem filterValidBins_sound (A : Finset Contig) (β : BinMap Contig BinId)
     (M : MarkerFamily Marker) (hits : Contig → Marker → ℕ)
     (len : Contig → ℕ) (τ : Contig → TaxRank → Option Taxon)

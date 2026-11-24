@@ -27,13 +27,13 @@ Rather than treating completeness, contamination, chimerism, taxonomic placement
   $$\text{Comp}(B_1 \sqcup B_2) + \text{Cont}(B_1 \sqcup B_2) = (\text{Comp}(B_1) + \text{Cont}(B_1)) + (\text{Comp}(B_2) + \text{Cont}(B_2))$$
 - **`cont_add_eq` & `comp_add_eq`**: Merging $B_1$ and $B_2$ creates *exact* cross-contamination equal to `sharedCompleteness(B₁, B₂)`, and reduces combined completeness relative to `Comp(B₁) + Comp(B₂)` by the exact same quantity.
 - **`split_completeness_ceiling`**: De-chimerizing a bin $B$ into $B_1 \sqcup B_2$ can recover at most `Comp(B) + Cont(B)` in total completeness.
-- **`stealth_chimera_exists`** *(Impossibility Theorem)*: For *every* marker family with $\ge 2$ distinct markers, two disjoint pure genomes merge into a **100%-complete, 0%-contaminated** chimeric MAG.
+- **`stealth_chimera_exists`** proves that for every family with at least two distinct markers, there exist two marker-count profiles with disjoint support and positive completeness. Each has zero marker contamination, and their sum scores **100% marker completeness and 0% marker contamination**. These scores alone cannot distinguish the combined profile from one copy of every marker.
 - **`accessory_invariance`**: Adding or removing arbitrary marker-free contigs (plasmids, prophages, accessory islands) leaves `Comp` and `Cont` strictly unchanged.
 
 ### 2. Finite-Sample Statistical Guarantees (`MAGLean/Probabilistic.lean`)
 - **`hoeffding_lemma_bernoulli`**: First-principles calculus proof of `(1 - p)e^{-pt} + p e^{(1-p)t} ≤ e^{t^2/8}`.
-- **`hoeffding_completeness_bound`**: Over $k$ independent collocated marker sets, $\Pr(|\widehat{p}_k - p| \ge \varepsilon) \le 2 e^{-2 k \varepsilon^2}$.
-- **`marker_count_sufficient` & `hoeffdingRadius_strict_shrink`**: Certified sample-size formula $k \ge \frac{\ln(2/\delta)}{2\varepsilon^2}$ and proof that moving to a more specific clade with strictly more marker sets strictly shrinks the confidence radius.
+- **`hoeffding_completeness_bound`**: For the mean of $k$ independent Bernoulli observations with common detection probability $p$, $\Pr(|\widehat{p}_k - p| \ge \varepsilon) \le 2 e^{-2 k \varepsilon^2}$.
+- **`marker_count_sufficient` & `hoeffdingRadius_strict_shrink`**: Certified sample-size formula $k \ge \frac{\ln(2/\delta)}{2\varepsilon^2}$ under that model. At fixed confidence level, increasing $k$ strictly shrinks the radius. To apply it to a MAG, the marker observations must justify the model: genes within one set can be partially detected, and distinct sets can have correlated detections.
 - **`single_marker_chimeric_expectation` & `mimag_mq_evasion_expectation`**: Under independent target ($p$) and contaminant ($q$), $\mathbb{E}[\text{Comp}_{\text{obs}}] = p + q - pq$ and $\mathbb{E}[\text{Cont}_{\text{obs}}] = pq$—proving that a 50%-complete bin + 18% foreign genome yields 59% apparent completeness and 9% contamination (passing MIMAG MQ in expectation).
 
 ### 3. Taxonomic Hierarchy & GUNC-Style Purity (`MAGLean/Taxonomy.lean`)

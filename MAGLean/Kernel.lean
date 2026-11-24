@@ -3,11 +3,11 @@ import Lean.Data.Json
 /-!
 # MAGLean.Kernel
 
-Zero-Mathlib, fast-compiling executable proof-carrying MAG QC kernel.
+Zero-Mathlib, fast-compiling executable MAG QC kernel.
 
 All rational arithmetic uses Lean 4's exact `Rat` type (identical to Mathlib's `ℚ`),
 eliminating floating-point rounding drift around MIMAG / CheckM / GUNC cutoffs.
-Semantic equivalence and soundness proofs connecting every function in this kernel
+Theorems connecting some functions in this kernel
 to the Mathlib formal theory (`MAGLean.Markers`, `MAGLean.Probabilistic`,
 `MAGLean.Taxonomy`, `MAGLean.Quality`) live in `MAGLean.Certificate`.
 -/
@@ -110,7 +110,8 @@ structure RankAudit where
   dominantTaxon : Option String
   deriving Repr
 
-/-- Proof-carrying MAG audit certificate emitted by the verified kernel. -/
+/-- MAG audit report emitted by the kernel. Which fields have a bridge theorem in
+`MAGLean.Certificate` is listed in the README section "What a report attests". -/
 structure MAGCertificate where
   magId : String
   lineage : String
@@ -264,7 +265,10 @@ def kRankAudit (contigs : List ContigEvidence) (r : KTaxRank) : RankAudit :=
     unclassifiedFrac := uFrac
     dominantTaxon := domOpt }
 
-/-! ### Verified Audit Entrypoint -/
+/-! ### Audit Entrypoint
+
+The parser, `auditMAG`, `kRankAudit`, `kCheckTaxCoherent` and the alerts have no bridge
+theorem in `MAGLean.Certificate`. -/
 
 def auditMAG (ev : MAGEvidence) : Except String MAGCertificate := do
   if ev.markerSets.isEmpty then
@@ -479,7 +483,7 @@ def renderReport (cert : MAGCertificate) : String :=
   let ciHi := if (1 : Rat) < cert.completeness + cert.hoeffding95Radius then (1 : Rat) else cert.completeness + cert.hoeffding95Radius
   let header := [
     "========================================================================",
-    s!"MAGLean Proof-Carrying QC Certificate: {cert.magId}",
+    s!"MAGLean QC Report: {cert.magId}",
     "========================================================================",
     s!"Lineage              : {cert.lineage}",
     s!"Assembly Summary     : {cert.numContigs} contigs, {cert.totalBp} bp",
@@ -497,7 +501,7 @@ def renderReport (cert : MAGCertificate) : String :=
     "------------------------------------------------------------------------",
     "VERIFIED STANDARDS & COHERENCE",
     s!"  MIMAG Tier         : {cert.mimagTier.label}",
-    s!"  Tree Coherence     : {if cert.taxCoherent then "CERTIFIED (TaxCoherent → rank-refinement monotonicity holds)" else "FAILED (violates prefix-closedness or tree consistency)"}",
+    s!"  Tree Coherence     : {if cert.taxCoherent then "PASS (prefix-closed and tree-consistent; this checker has no bridge theorem)" else "FAILED (violates prefix-closedness or tree consistency)"}",
     "------------------------------------------------------------------------",
     "TAXONOMIC RANK PURITY & CHIMERISM AUDIT (Conservative / Optimistic / Drop)"
   ]

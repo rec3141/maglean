@@ -3,7 +3,7 @@ import MAGLean.Kernel
 open MAGLean.Kernel
 
 def usage : String :=
-  "MAGLean — Proof-Carrying Quality Control Auditor for Metagenome-Assembled Genomes\n\n" ++
+  "MAGLean — Quality Control Auditor for Metagenome-Assembled Genomes\n\n" ++
   "Usage:\n" ++
   "  maglean [--json] <evidence.json> [evidence2.json ...]\n\n" ++
   "Options:\n" ++

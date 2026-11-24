@@ -590,6 +590,45 @@ theorem rank_refinement_monotonicity (B : Finset Contig) (len : Contig → ℕ)
   unfold chimerismScore
   linarith
 
+/-- **Purity-Drop Monotonicity When Fully Classified**:
+Under tree-coherent contig taxonomy (`TaxCoherent B τ`), if every contig in `B` is
+classified at the finer rank `r₂` (`unclassifiedLen B len τ r₂ = 0`), then `purityDrop`
+cannot increase from `r₁` to `r₂` (`purityDrop r₂ ≤ purityDrop r₁`). Consequently, any
+strict upward jump `purityDrop r₁ < purityDrop r₂` on a tree-coherent bin mathematically
+requires `0 < unclassifiedLen B len τ r₂`. -/
+theorem rank_refinement_purityDrop_of_fully_classified (B : Finset Contig) (len : Contig → ℕ)
+    (τ : Contig → TaxRank → Option Taxon) (hcoh : TaxCoherent B τ)
+    {r₁ r₂ : TaxRank} (hr : r₁ ≤ r₂)
+    (hfull : unclassifiedLen B len τ r₂ = 0) :
+    purityDrop B len τ r₂ ≤ purityDrop B len τ r₁ := by
+  have hcls2_eq : classifiedLen B len τ r₂ = totalLen B len := by
+    have := classifiedLen_add_unclassifiedLen B len τ r₂
+    linarith
+  have hmono := rank_refinement_monotonicity B len τ hcoh hr
+  have hmax_le : maxTaxonWeight B len τ r₂ ≤ maxTaxonWeight B len τ r₁ := hmono.1
+  have hcls1_le : classifiedLen B len τ r₁ ≤ totalLen B len := by
+    have h1 := classifiedLen_add_unclassifiedLen B len τ r₁
+    have h2 : 0 ≤ unclassifiedLen B len τ r₁ := totalLen_nonneg (unclassifiedAt B τ r₁) len
+    linarith
+  unfold purityDrop
+  by_cases htot0 : totalLen B len = 0
+  · have hcls2_0 : classifiedLen B len τ r₂ = 0 := by linarith
+    have hcls1_0 : classifiedLen B len τ r₁ = 0 :=
+      le_antisymm (by linarith) (totalLen_nonneg (classifiedAt B τ r₁) len)
+    simp [hcls2_0, hcls1_0]
+  · have htot_pos : 0 < totalLen B len := lt_of_le_of_ne (totalLen_nonneg B len) (Ne.symm htot0)
+    -- Every contig classified at `r₂` is also classified at `r₁` by prefix-closedness
+    have hsub : classifiedAt B τ r₂ ⊆ classifiedAt B τ r₁ := by
+      intro c hc
+      simp only [classifiedAt, Finset.mem_filter] at hc ⊢
+      exact ⟨hc.1, hcoh.prefix_closed c hc.1 r₁ r₂ hr hc.2⟩
+    have hcls_ge : classifiedLen B len τ r₂ ≤ classifiedLen B len τ r₁ := by
+      unfold classifiedLen totalLen
+      exact Finset.sum_le_sum_of_subset_of_nonneg hsub (fun _ _ _ => by positivity)
+    have hcls1_eq : classifiedLen B len τ r₁ = totalLen B len := by linarith
+    simp only [hcls2_eq, hcls1_eq, htot0, ↓reduceIte]
+    exact div_le_div_of_nonneg_right hmax_le (le_of_lt htot_pos)
+
 /-- **Closing the Stealth-Chimera Loophole**:
 If a bin `B = B₁ ∪ B₂` (disjoint) merges two positive-length sub-bins belonging to
 distinct clades `t₁ ≠ t₂` at rank `r`, then even if marker-based contamination is `0`,

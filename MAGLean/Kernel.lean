@@ -114,6 +114,15 @@ structure ReportProvenance where
   leanToolchain : String := Lean.versionString
   deriving Repr, Inhabited
 
+/-- Configurable thresholds for taxonomic alert evaluation (informed by CAMI II
+benchmarking in Issues #8 and #9). Defaults evaluate stealth chimerism at `genus`
+and above (avoiding species-level classifier splits on novel strains) and require
+at least 50% classified bp at the evaluated rank. -/
+structure AuditConfig where
+  maxChimeraRank : KTaxRank := .genus
+  minClassifiedFrac : Rat := (1 : Rat) / 2
+  deriving Repr, Inhabited
+
 /-- Per-rank taxonomic purity audit record. -/
 structure RankAudit where
   rank : KTaxRank
@@ -128,6 +137,7 @@ structure RankAudit where
 /-- MAG audit report emitted by the kernel. -/
 structure MAGCertificate where
   provenance : ReportProvenance
+  config : AuditConfig
   magId : String
   lineage : String
   numContigs : Nat
@@ -144,6 +154,7 @@ structure MAGCertificate where
   compositeScoreQ5 : Rat
   hoeffding95Radius : Rat
   contigHoeffding95Radius : Rat
+  speciesConservativeImpurity : Rat
   mimagTier : KMIMAGTier
   taxCoherent : Bool
   rankAudits : List RankAudit
@@ -284,7 +295,8 @@ def kRankAudit (contigs : List ContigEvidence) (r : KTaxRank) : RankAudit :=
 
 /-! ### Audit Entrypoint -/
 
-def auditMAG (ev : MAGEvidence) (prov : ReportProvenance := {}) : Except String MAGCertificate := do
+def auditMAG (ev : MAGEvidence) (prov : ReportProvenance := {}) (cfg : AuditConfig := {}) :
+    Except String MAGCertificate := do
   if ev.markerSets.isEmpty then
     throw "Invalid evidence: marker_sets must be nonempty."
   if ev.markerSets.any (fun s => (dedupStrings s).isEmpty) then
@@ -312,6 +324,10 @@ def auditMAG (ev : MAGEvidence) (prov : ReportProvenance := {}) : Except String 
   let rad95 := certifiedHoeffding95Radius ev.markerSets.length
   let coherent := kCheckTaxCoherent ev.contigs
   let rankAudits := KTaxRank.all.map (kRankAudit ev.contigs)
+  let speciesImpurity : Rat :=
+    match rankAudits.find? (fun ra => ra.rank == .species) with
+    | some ra => ra.chimerism
+    | none => 0
   let allMarkers := dedupStrings (ev.markerSets.flatten)
   let accContigs := ev.contigs.filter (fun c => c.markers.all (fun g => !allMarkers.contains g))
   let markerContigs := ev.contigs.length - accContigs.length
@@ -323,22 +339,33 @@ def auditMAG (ev : MAGEvidence) (prov : ReportProvenance := {}) : Except String 
     alerts := alerts ++ ["TAXONOMIC_INCOHERENCE: Contig lineages violate tree consistency or prefix-closedness."]
   if (9 : Rat) / 10 < comp && cont < (1 : Rat) / 20 && !ev.rna.satisfiesHQ then
     alerts := alerts ++ ["MIMAG_HQ_RNA_DOWNGRADE: Marker metrics pass HQ (>90% comp, <5% cont) but RNA profile fails (23S/16S/5S + ≥18 tRNAs); downgraded to MQ."]
+  -- Stealth chimera alert (Issues #8): evaluate only at ranks `≤ cfg.maxChimeraRank`
+  -- (default `genus`, avoiding species-level splits on novel strains) with classified bp
+  -- fraction `1 - unclassifiedFrac ≥ cfg.minClassifiedFrac` (default 50%).
   let worstOptimisticPurity : Rat :=
-    rankAudits.foldl (fun acc ra => if ra.purityOpt < acc then ra.purityOpt else acc) (1 : Rat)
+    rankAudits.foldl (fun acc ra =>
+      let classFrac := (1 : Rat) - ra.unclassifiedFrac
+      if KTaxRank.le ra.rank cfg.maxChimeraRank && cfg.minClassifiedFrac ≤ classFrac &&
+          ra.purityOpt < acc then ra.purityOpt else acc) (1 : Rat)
   if cont < (1 : Rat) / 20 && worstOptimisticPurity < (9 : Rat) / 10 then
-    alerts := alerts ++ ["STEALTH_CHIMERA_ALERT: Low marker contamination (<5%) masks multi-clade taxonomic chimerism (>10% of bp classified outside the dominant taxon)."]
+    alerts := alerts ++ [s!"STEALTH_CHIMERA_ALERT: Low marker contamination (<5%) masks multi-clade taxonomic chimerism (>10% of bp classified outside the dominant taxon at rank ≤ {cfg.maxChimeraRank.label} with ≥{formatPercent cfg.minClassifiedFrac} classified bp)."]
+  -- Unclassified dilution alert (Issue #9): fire only when a coarser rank (≤ maxChimeraRank)
+  -- is genuinely impure (`purityDrop < 90%`) and a finer rank masks it to `purityDrop ≥ 90%`
+  -- by dropping unclassified contigs, rather than on benign upward drift of already-clean bins.
   let mut dilutionDetected := false
   for ra₁ in rankAudits do
     for ra₂ in rankAudits do
-      if KTaxRank.lt ra₁.rank ra₂.rank && ra₁.purityDrop < ra₂.purityDrop &&
-          ra₁.unclassifiedFrac < 1 && ra₂.unclassifiedFrac < 1 then
+      if KTaxRank.le ra₁.rank cfg.maxChimeraRank && KTaxRank.lt ra₁.rank ra₂.rank &&
+          ra₁.unclassifiedFrac < 1 && ra₂.unclassifiedFrac < 1 &&
+          ra₁.purityDrop < (9 : Rat) / 10 && (9 : Rat) / 10 ≤ ra₂.purityDrop then
         dilutionDetected := true
   if dilutionDetected then
-    alerts := alerts ++ ["UNCLASSIFIED_DILUTION_ALERT: Drop-unclassified purity artificially increased at a finer rank; inspect [purityCons, purityOpt] sandwich interval."]
+    alerts := alerts ++ ["UNCLASSIFIED_DILUTION_ALERT: Coarser-rank chimerism (drop-purity <90%) is masked to ≥90% at a finer rank by dropping unclassified contigs; inspect [purityCons, purityOpt] sandwich interval."]
   if ev.markerSets.length < 50 then
     alerts := alerts ++ [s!"LOW_MARKER_RESOLUTION: Only {ev.markerSets.length} collocated marker sets; independent-set ≥95% Hoeffding radius is ±{formatPercent rad95}."]
   return {
     provenance := prov
+    config := cfg
     magId := ev.magId
     lineage := ev.lineage
     numContigs := ev.contigs.length
@@ -355,6 +382,7 @@ def auditMAG (ev : MAGEvidence) (prov : ReportProvenance := {}) : Except String 
     compositeScoreQ5 := q5
     hoeffding95Radius := rad95
     contigHoeffding95Radius := contigRad95
+    speciesConservativeImpurity := speciesImpurity
     mimagTier := tier
     taxCoherent := coherent
     rankAudits := rankAudits
@@ -373,7 +401,7 @@ where
 
 /-! ### JSON Parsing & Rendering -/
 
-private def parseRankKey : String → Option KTaxRank
+def parseRankKey : String → Option KTaxRank
   | "domain"  => some .domain
   | "phylum"  => some .phylum
   | "class"   => some .class_
@@ -564,6 +592,9 @@ def renderJson (cert : MAGCertificate) : Json :=
     ("hoeffding_95_radius_exact", Json.str (formatRat cert.hoeffding95Radius)),
     ("hoeffding_95_assumptions", Json.str "conditional on independent [0,1]-bounded marker-set detections"),
     ("contig_hoeffding_95_radius_exact", Json.str (formatRat cert.contigHoeffding95Radius)),
+    ("species_conservative_impurity_exact", Json.str (formatRat cert.speciesConservativeImpurity)),
+    ("max_chimera_rank", Json.str cert.config.maxChimeraRank.label),
+    ("min_classified_frac_exact", Json.str (formatRat cert.config.minClassifiedFrac)),
     ("mimag_tier", Json.str cert.mimagTier.label),
     ("tax_coherent", Json.bool cert.taxCoherent),
     ("rank_audits", Json.arr (cert.rankAudits.toArray.map fun ra =>

@@ -42,6 +42,7 @@ zero custom axioms, zero `Lean.ofReduceBool` / `native_decide` trust.
 #print axioms MAGLean.Taxonomy.lca_zero_lineage_loss
 #print axioms MAGLean.Taxonomy.purity_unclassified_sandwich
 #print axioms MAGLean.Taxonomy.rank_refinement_monotonicity
+#print axioms MAGLean.Taxonomy.rank_refinement_purityDrop_of_fully_classified
 #print axioms MAGLean.Taxonomy.taxonomic_catches_stealth_chimera
 #print axioms MAGLean.Taxonomy.unclassified_dilution_counterexample
 

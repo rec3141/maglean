@@ -101,13 +101,13 @@ lake env lean Tests/AxiomAudit.lean
 
 ### 3. Run the MAG QC Auditor
 ```bash
-# Default text report (with SHA-256 provenance and contig-level Hoeffding radius)
+# Default text report (SHA-256 provenance, contig-level radius, genus-level stealth-chimera calibration)
 .lake/build/bin/maglean examples/hq_ecoli_mag.json examples/stealth_chimera_mag.json
 
-# Include conditional independent-marker-set Hoeffding CI in text output
-.lake/build/bin/maglean --ci examples/hq_ecoli_mag.json
+# Include conditional independent-marker-set Hoeffding CI or tune taxonomic alert rank/coverage
+.lake/build/bin/maglean --ci --max-chimera-rank species --min-classified-pct 50 examples/hq_ecoli_mag.json
 
-# Machine-readable JSON report
+# Machine-readable JSON report (includes species_conservative_impurity_exact and full provenance)
 .lake/build/bin/maglean --json examples/unclassified_dilution_mag.json
 ```
 

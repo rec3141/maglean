@@ -19,13 +19,15 @@ def buildGitCommit : String := gitCommitHash%
 def usage : String :=
   "MAGLean — Quality Control Auditor for Metagenome-Assembled Genomes\n\n" ++
   "Usage:\n" ++
-  "  maglean [--json] [--ci] <evidence.json> [evidence2.json ...]\n\n" ++
+  "  maglean [options] <evidence.json> [evidence2.json ...]\n\n" ++
   "Options:\n" ++
-  "  --json    Emit machine-readable JSON report(s) instead of text reports\n" ++
-  "  --ci      Include the conditional independent-marker-set Hoeffding CI in text reports\n" ++
-  "  --help    Show this usage message\n"
+  "  --json                        Emit machine-readable JSON report(s)\n" ++
+  "  --ci                          Include conditional independent-marker-set Hoeffding CI in text reports\n" ++
+  "  --max-chimera-rank <rank>     Finest rank checked for STEALTH_CHIMERA_ALERT (default: genus)\n" ++
+  "  --min-classified-pct <0..100> Minimum classified bp % for STEALTH_CHIMERA_ALERT (default: 50)\n" ++
+  "  --help                        Show this usage message\n"
 
-def processFile (jsonMode showCI : Bool) (path : System.FilePath) : IO UInt32 := do
+def processFile (jsonMode showCI : Bool) (cfg : AuditConfig) (path : System.FilePath) : IO UInt32 := do
   let rawBytes ← try
     IO.FS.readBinFile path
   catch e =>
@@ -48,7 +50,7 @@ def processFile (jsonMode showCI : Bool) (path : System.FilePath) : IO UInt32 :=
     IO.eprintln s!"Parse error in '{path}': {e}"
     return 2
   | .ok ev =>
-    match auditMAG ev prov with
+    match auditMAG ev prov cfg with
     | .error e =>
       IO.eprintln s!"Audit precondition error in '{path}': {e}"
       return 2
@@ -60,23 +62,40 @@ def processFile (jsonMode showCI : Bool) (path : System.FilePath) : IO UInt32 :=
       return 0
 
 def main (args : List String) : IO UInt32 := do
-  let rec parseArgs (jsonMode showCI : Bool) (files : List String) :
-      List String → IO (Option (Bool × Bool × List String))
-    | [] => pure (some (jsonMode, showCI, files.reverse))
+  let rec parseArgs (jsonMode showCI : Bool) (cfg : AuditConfig) (files : List String) :
+      List String → IO (Except UInt32 (Bool × Bool × AuditConfig × List String))
+    | [] => pure (.ok (jsonMode, showCI, cfg, files.reverse))
     | "--help" :: _ | "-h" :: _ => do
       IO.println usage
-      pure none
-    | "--json" :: rest => parseArgs true showCI files rest
-    | "--ci" :: rest => parseArgs jsonMode true files rest
-    | path :: rest => parseArgs jsonMode showCI (path :: files) rest
-  match ← parseArgs false false [] args with
-  | none => return 0
-  | some (_, _, []) => do
+      pure (.error 0)
+    | "--json" :: rest => parseArgs true showCI cfg files rest
+    | "--ci" :: rest => parseArgs jsonMode true cfg files rest
+    | "--max-chimera-rank" :: rStr :: rest =>
+      match parseRankKey rStr with
+      | some rk => parseArgs jsonMode showCI { cfg with maxChimeraRank := rk } files rest
+      | none => do
+        IO.eprintln s!"Invalid --max-chimera-rank '{rStr}'; expected domain|phylum|class|order|family|genus|species"
+        pure (.error 2)
+    | "--min-classified-pct" :: pStr :: rest =>
+      match pStr.toNat? with
+      | some p =>
+        if p ≤ 100 then
+          parseArgs jsonMode showCI { cfg with minClassifiedFrac := (p : Rat) / 100 } files rest
+        else do
+          IO.eprintln s!"Invalid --min-classified-pct '{pStr}'; expected integer 0..100"
+          pure (.error 2)
+      | none => do
+        IO.eprintln s!"Invalid --min-classified-pct '{pStr}'; expected integer 0..100"
+        pure (.error 2)
+    | path :: rest => parseArgs jsonMode showCI cfg (path :: files) rest
+  match ← parseArgs false false {} [] args with
+  | .error code => return code
+  | .ok (_, _, _, []) => do
     IO.eprintln usage
     return 1
-  | some (jsonMode, showCI, files) => do
+  | .ok (jsonMode, showCI, cfg, files) => do
     let mut exitCode : UInt32 := 0
     for f in files do
-      let rc ← processFile jsonMode showCI f
+      let rc ← processFile jsonMode showCI cfg f
       if rc != 0 then exitCode := rc
     return exitCode

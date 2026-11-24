@@ -299,6 +299,111 @@ def test_converter_strict_rejections():
     print("PASS: test_converter_strict_rejections")
 
 
+def test_cami_alert_calibration():
+    """Regression tests for Issues #8 and #9 (CAMI II marine benchmark false alarms)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        # 1. Congeneric species split (Issue #8): 100% pure at genus, split 50/50 at species
+        congeneric = {
+            "mag_id": "CAMI_Psychrobacter_Congeneric",
+            "lineage": "d__Bacteria;p__Pseudomonadota;g__Psychrobacter",
+            "marker_sets": [["M1"], ["M2"], ["M3"], ["M4"], ["M5"]],
+            "rna": {"has_23S": True, "has_16S": True, "has_5S": True, "distinct_tRNAs": 20},
+            "contigs": [
+                {
+                    "id": "c1", "length": 1500000, "markers": ["M1", "M2", "M3"],
+                    "taxonomy": {
+                        "domain": "Bacteria", "phylum": "Pseudomonadota",
+                        "class": "Gammaproteobacteria", "order": "Pseudomonadales",
+                        "family": "Moraxellaceae", "genus": "Psychrobacter",
+                        "species": "Psychrobacter arcticus",
+                    },
+                },
+                {
+                    "id": "c2", "length": 1500000, "markers": ["M4", "M5"],
+                    "taxonomy": {
+                        "domain": "Bacteria", "phylum": "Pseudomonadota",
+                        "class": "Gammaproteobacteria", "order": "Pseudomonadales",
+                        "family": "Moraxellaceae", "genus": "Psychrobacter",
+                        "species": "Psychrobacter cryohalolentis",
+                    },
+                },
+            ],
+        }
+        p1 = Path(tmp) / "congeneric.json"
+        p1.write_text(json.dumps(congeneric), encoding="utf-8")
+        # Default (max-chimera-rank=genus): NO false STEALTH_CHIMERA_ALERT, species impurity still reported!
+        r_def = run_cli("--json", str(p1))
+        assert r_def.returncode == 0, r_def.stderr
+        d_def = json.loads(r_def.stdout)
+        assert not any("STEALTH_CHIMERA_ALERT" in a for a in d_def["alerts"]), d_def["alerts"]
+        assert parse_frac(d_def["species_conservative_impurity_exact"]) == Fraction(1, 2)
+        # Opting into --max-chimera-rank species fires the alert
+        r_sp = run_cli("--json", "--max-chimera-rank", "species", str(p1))
+        assert r_sp.returncode == 0, r_sp.stderr
+        assert any("STEALTH_CHIMERA_ALERT" in a for a in json.loads(r_sp.stdout)["alerts"])
+
+        # 2. Mostly-unclassified rank (Issue #8): 75% unclassified at phylum, 13% A + 12% B
+        sparse = {
+            "mag_id": "CAMI_Mostly_Unclassified",
+            "lineage": "d__Bacteria",
+            "marker_sets": [["M1"], ["M2"], ["M3"], ["M4"], ["M5"]],
+            "rna": {"has_23S": True, "has_16S": True, "has_5S": True, "distinct_tRNAs": 20},
+            "contigs": [
+                {"id": "u1", "length": 750000, "markers": ["M1", "M2", "M3"], "taxonomy": {"domain": "Bacteria"}},
+                {"id": "a1", "length": 130000, "markers": ["M4"], "taxonomy": {"domain": "Bacteria", "phylum": "Pseudomonadota"}},
+                {"id": "b1", "length": 120000, "markers": ["M5"], "taxonomy": {"domain": "Bacteria", "phylum": "Bacteroidota"}},
+            ],
+        }
+        p2 = Path(tmp) / "sparse.json"
+        p2.write_text(json.dumps(sparse), encoding="utf-8")
+        # Only 25% classified at phylum (<50% default min_classified_frac) => NO false alarm
+        r_sp2 = run_cli("--json", str(p2))
+        assert r_sp2.returncode == 0, r_sp2.stderr
+        assert not any("STEALTH_CHIMERA_ALERT" in a for a in json.loads(r_sp2.stdout)["alerts"])
+
+        # 3. Clean-bin drop-purity upward drift (Issue #9): 94% at family -> 98% at genus
+        drift = {
+            "mag_id": "CAMI_Clean_Drift",
+            "lineage": "d__Bacteria",
+            "marker_sets": [["M1"], ["M2"], ["M3"], ["M4"], ["M5"]],
+            "rna": {"has_23S": True, "has_16S": True, "has_5S": True, "distinct_tRNAs": 20},
+            "contigs": [
+                {
+                    "id": "main", "length": 940000, "markers": ["M1", "M2", "M3", "M4", "M5"],
+                    "taxonomy": {
+                        "domain": "Bacteria", "phylum": "Pseudomonadota",
+                        "class": "Gammaproteobacteria", "order": "Enterobacterales",
+                        "family": "Enterobacteriaceae", "genus": "Escherichia",
+                    },
+                },
+                {
+                    "id": "noise_unclass", "length": 40000, "markers": [],
+                    "taxonomy": {
+                        "domain": "Bacteria", "phylum": "Pseudomonadota",
+                        "class": "Gammaproteobacteria", "order": "Enterobacterales",
+                        "family": "Vibrionaceae",
+                    },
+                },
+                {
+                    "id": "noise_small", "length": 20000, "markers": [],
+                    "taxonomy": {
+                        "domain": "Bacteria", "phylum": "Pseudomonadota",
+                        "class": "Gammaproteobacteria", "order": "Enterobacterales",
+                        "family": "Vibrionaceae", "genus": "Vibrio",
+                    },
+                },
+            ],
+        }
+        p3 = Path(tmp) / "drift.json"
+        p3.write_text(json.dumps(drift), encoding="utf-8")
+        r_dr = run_cli("--json", str(p3))
+        assert r_dr.returncode == 0, r_dr.stderr
+        d_dr = json.loads(r_dr.stdout)
+        # Coarser family drop-purity is 94% (>=90%), so rising to 94/96 at genus is benign drift
+        assert not any("UNCLASSIFIED_DILUTION_ALERT" in a for a in d_dr["alerts"]), d_dr["alerts"]
+    print("PASS: test_cami_alert_calibration")
+
+
 if __name__ == "__main__":
     if not BIN.exists():
         sys.exit(f"Binary not found: {BIN}")
@@ -316,4 +421,5 @@ if __name__ == "__main__":
     test_converter_real_ecoli_mg1655()
     test_converter_real_uba_mag()
     test_converter_strict_rejections()
-    print("\nALL 14 CLI & CONVERTER TESTS PASSED!")
+    test_cami_alert_calibration()
+    print("\nALL 15 CLI, CAMI CALIBRATION & CONVERTER TESTS PASSED!")

@@ -134,6 +134,15 @@ def test_unclassified_is_not_chimerism():
     print("PASS: test_unclassified_is_not_chimerism")
 
 
+def test_sparse_rank_second_taxon_is_not_chimerism():
+    # 3.99 Mb unclassified at genus/species; 5 kb E. coli and 5 kb Salmonella (Meridian).
+    res = run_cli("--json", str(REGRESSION / "sparse_rank_two_taxa.json"))
+    assert res.returncode == 0, res.stderr
+    data = json.loads(res.stdout)
+    assert not any("STEALTH_CHIMERA_ALERT" in a for a in data["alerts"]), data["alerts"]
+    print("PASS: test_sparse_rank_second_taxon_is_not_chimerism")
+
+
 def test_rejects_unknown_rank_key():
     res = run_cli("--json", str(REGRESSION / "capitalised_rank_keys.json"))
     assert res.returncode == 2, res.stdout
@@ -165,6 +174,7 @@ if __name__ == "__main__":
     test_contaminated_mag()
     test_text_reports_and_errors()
     test_unclassified_is_not_chimerism()
+    test_sparse_rank_second_taxon_is_not_chimerism()
     test_rejects_unknown_rank_key()
     test_rejects_duplicate_marker_sets()
     test_rejects_zero_length_contig()

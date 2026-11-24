@@ -50,7 +50,10 @@ def bernProb {k : ℕ} (p : ℝ) (ω : Fin k → Bool) : ℝ :=
 /-- Indicator `0`/`1` of a single marker hit. -/
 def indBool (b : Bool) : ℝ := if b then 1 else 0
 
-/-- Empirical completeness across `k` independent marker sets. -/
+/-- Sample mean of `k` Boolean observations `ω : Fin k → Bool`.
+Under the product Bernoulli model (`bernProb p`), this models empirical completeness
+only under the assumption of `k` independent binary observations with common detection
+probability `p`. -/
 def empComp {k : ℕ} (ω : Fin k → Bool) : ℝ :=
   (∑ i : Fin k, indBool (ω i)) / (k : ℝ)
 
@@ -594,14 +597,15 @@ theorem hoeffding_completeness_bound {k : ℕ} (hk : 0 < k) {p ε : ℝ}
         add_le_add (hoeffding_upper_tail hk hp0 hp1 hε) (hoeffding_lower_tail hk hp0 hp1 hε)
     _ = 2 * Real.exp (-2 * (k : ℝ) * ε ^ 2) := by ring
 
-/-- **Certified Hoeffding Radius** for `k` independent marker sets at failure rate `δ`:
-`hoeffdingRadius k δ = √(log (2 / δ) / (2 * k))`. -/
+/-- **Hoeffding Radius Function**: `hoeffdingRadius k δ = √(log (2 / δ) / (2 * k))`.
+Under the independent Bernoulli model (`bernProb p`), this gives a `1 - δ` two-sided
+deviation radius for `empComp` on `k` observations. -/
 noncomputable def hoeffdingRadius (k : ℕ) (δ : ℝ) : ℝ :=
   Real.sqrt (Real.log (2 / δ) / (2 * (k : ℝ)))
 
-/-- **Marker-Count Sample-Size Guarantee**: If the number of independent collocated
-marker sets satisfies `k ≥ log (2 / δ) / (2 * ε ^ 2)`, then empirical completeness
-stays within `± ε` of true completeness `p` with probability at least `1 - δ`. -/
+/-- **Sample-Size Bound under the Independent Bernoulli Model**: For `k` independent
+Bernoulli(`p`) observations, if `k ≥ log (2 / δ) / (2 * ε ^ 2)`, then
+`Pr(|empComp - p| ≥ ε) ≤ δ`. -/
 theorem marker_count_sufficient {k : ℕ} (hk : 0 < k) {p ε δ : ℝ}
     (hp0 : 0 ≤ p) (hp1 : p ≤ 1) (hε : 0 < ε) (hδ : 0 < δ)
     (hsize : Real.log (2 / δ) / (2 * ε ^ 2) ≤ (k : ℝ)) :
@@ -624,9 +628,10 @@ theorem marker_count_sufficient {k : ℕ} (hk : 0 < k) {p ε δ : ℝ}
       _ = δ / 2 := Real.exp_log (by positivity)
   linarith
 
-/-- **Taxonomic Resolution Gain Theorem**: Moving down a taxonomy to a lineage-specific
-marker family with strictly more independent marker sets (`k₁ < k₂`) strictly shrinks
-the certified Hoeffding confidence radius (for `δ ∈ (0, 2)`). -/
+/-- **Monotonicity of `hoeffdingRadius` in `k`**: For fixed `δ ∈ (0, 2)` and
+`0 < k₁ < k₂`, `hoeffdingRadius k₂ δ < hoeffdingRadius k₁ δ`.
+Whether a finer taxonomic marker family satisfies the independence assumption of the
+underlying model is an external biological assumption. -/
 theorem hoeffdingRadius_strict_shrink {k₁ k₂ : ℕ} {δ : ℝ}
     (hk₁ : 0 < k₁) (hlt : k₁ < k₂) (hδ0 : 0 < δ) (hδ2 : δ < 2) :
     hoeffdingRadius k₂ δ < hoeffdingRadius k₁ δ := by
@@ -637,6 +642,227 @@ theorem hoeffdingRadius_strict_shrink {k₁ k₂ : ℕ} {δ : ℝ}
   have hfrac : Real.log (2 / δ) / (2 * (k₂ : ℝ)) < Real.log (2 / δ) / (2 * (k₁ : ℝ)) :=
     div_lt_div_of_pos_left hlog (by positivity) (by linarith)
   exact Real.sqrt_lt_sqrt (by positivity) hfrac
+
+/-! ### General Bounded `[0, 1]` & Weighted Contig-Level Hoeffding Bounds -/
+
+/-- Convexity inequality for `exp` on `[0, 1]`: for all `x ∈ [0, 1]` and `t : ℝ`,
+`exp (t * x) ≤ (1 - x) + x * exp t`. -/
+lemma exp_mul_le_linear_on_unit {x : ℝ} (hx0 : 0 ≤ x) (hx1 : x ≤ 1) (t : ℝ) :
+    Real.exp (t * x) ≤ (1 - x) + x * Real.exp t := by
+  have h1 : 1 + (-t * x) ≤ Real.exp (-t * x) := by linarith [Real.add_one_le_exp (-t * x)]
+  have h2 : 1 + t * (1 - x) ≤ Real.exp (t * (1 - x)) := by linarith [Real.add_one_le_exp (t * (1 - x))]
+  have hcomb : (1 : ℝ) ≤ (1 - x) * Real.exp (-t * x) + x * Real.exp (t * (1 - x)) := by
+    have ha : (1 - x) * (1 + (-t * x)) ≤ (1 - x) * Real.exp (-t * x) :=
+      mul_le_mul_of_nonneg_left h1 (by linarith)
+    have hb : x * (1 + t * (1 - x)) ≤ x * Real.exp (t * (1 - x)) :=
+      mul_le_mul_of_nonneg_left h2 hx0
+    linarith
+  have hmul := mul_le_mul_of_nonneg_left hcomb (le_of_lt (Real.exp_pos (t * x)))
+  have hrhs : Real.exp (t * x) * ((1 - x) * Real.exp (-t * x) + x * Real.exp (t * (1 - x))) =
+      (1 - x) + x * Real.exp t := by
+    rw [mul_add]
+    have ha : Real.exp (t * x) * ((1 - x) * Real.exp (-t * x)) = 1 - x := by
+      rw [mul_left_comm, ← Real.exp_add]
+      have : t * x + -t * x = 0 := by ring
+      rw [this, Real.exp_zero, mul_one]
+    have hb : Real.exp (t * x) * (x * Real.exp (t * (1 - x))) = x * Real.exp t := by
+      rw [mul_left_comm, ← Real.exp_add]
+      congr 2; ring
+    rw [ha, hb]
+  linarith
+
+/-- **General Finite-Support Hoeffding's Lemma on `[0, 1]`**:
+For any finite probability distribution `(w : ι → ℝ)` (`w i ≥ 0`, `∑ w i = 1`) and any
+bounded `[0, 1]`-valued random variable `X : ι → ℝ` (e.g. a fractional multi-gene
+collocated marker-set score, or a contig's normalized completeness contribution) with
+mean `μ = ∑ i, w i * X i`, we have
+`∑ i, w i * exp (t * (X i - μ)) ≤ exp (t ^ 2 / 8)` for all `t : ℝ`. -/
+theorem hoeffding_lemma_bounded {ι : Type*} [Fintype ι]
+    (w X : ι → ℝ)
+    (hw0 : ∀ i, 0 ≤ w i) (hw1 : ∑ i, w i = 1)
+    (hX0 : ∀ i, 0 ≤ X i) (hX1 : ∀ i, X i ≤ 1)
+    (t : ℝ) :
+    let μ := ∑ i, w i * X i
+    ∑ i, w i * Real.exp (t * (X i - μ)) ≤ Real.exp (t ^ 2 / 8) := by
+  intro μ
+  have hμ0 : 0 ≤ μ := Finset.sum_nonneg (fun i _ => mul_nonneg (hw0 i) (hX0 i))
+  have hμ1 : μ ≤ 1 := by
+    calc μ = ∑ i, w i * X i := rfl
+      _ ≤ ∑ i, w i * 1 := Finset.sum_le_sum (fun i _ => mul_le_mul_of_nonneg_left (hX1 i) (hw0 i))
+      _ = 1 := by simp [hw1]
+  have hstep : ∀ i : ι,
+      w i * Real.exp (t * (X i - μ)) ≤
+        w i * ((1 - X i) * Real.exp (-μ * t) + X i * Real.exp ((1 - μ) * t)) := by
+    intro i
+    apply mul_le_mul_of_nonneg_left _ (hw0 i)
+    have hsplit : Real.exp (t * (X i - μ)) = Real.exp (-μ * t) * Real.exp (t * X i) := by
+      rw [← Real.exp_add]; congr 1; ring
+    rw [hsplit]
+    have hlin := exp_mul_le_linear_on_unit (hX0 i) (hX1 i) t
+    have hmul := mul_le_mul_of_nonneg_left hlin (le_of_lt (Real.exp_pos (-μ * t)))
+    have hrhs : Real.exp (-μ * t) * ((1 - X i) + X i * Real.exp t) =
+        (1 - X i) * Real.exp (-μ * t) + X i * Real.exp ((1 - μ) * t) := by
+      rw [mul_add]
+      have h2 : Real.exp (-μ * t) * (X i * Real.exp t) = X i * Real.exp ((1 - μ) * t) := by
+        rw [mul_left_comm, ← Real.exp_add]; congr 2; ring
+      rw [h2, mul_comm (Real.exp (-μ * t)) (1 - X i)]
+    linarith
+  have hsum_eq :
+      ∑ i, w i * ((1 - X i) * Real.exp (-μ * t) + X i * Real.exp ((1 - μ) * t)) =
+        (1 - μ) * Real.exp (-μ * t) + μ * Real.exp ((1 - μ) * t) := by
+    have hrew : ∀ i : ι,
+        w i * ((1 - X i) * Real.exp (-μ * t) + X i * Real.exp ((1 - μ) * t)) =
+          (w i - w i * X i) * Real.exp (-μ * t) + (w i * X i) * Real.exp ((1 - μ) * t) := by
+      intro i; ring
+    simp_rw [hrew]
+    rw [Finset.sum_add_distrib, ← Finset.sum_mul, ← Finset.sum_mul, Finset.sum_sub_distrib, hw1]
+  calc ∑ i, w i * Real.exp (t * (X i - μ))
+      ≤ ∑ i, w i * ((1 - X i) * Real.exp (-μ * t) + X i * Real.exp ((1 - μ) * t)) :=
+        Finset.sum_le_sum (fun i _ => hstep i)
+    _ = (1 - μ) * Real.exp (-μ * t) + μ * Real.exp ((1 - μ) * t) := hsum_eq
+    _ ≤ Real.exp (t ^ 2 / 8) := hoeffding_lemma_bernoulli hμ0 hμ1 t
+
+/-- **Weighted Independent `[0, 1]` Hoeffding Bound** (covers both multi-gene fractional
+collocated marker sets and independent contig-level weights `a : Fin m → ℝ`):
+For `m` independent finite-state `[0, 1]`-valued random variables `X_j` with arbitrary
+means `μ_j` and weights `a_j`, let `S(ω) = ∑ j, a j * X j (ω j)` and
+`V = ∑ j, (a j) ^ 2 > 0` (so `k_eff = 1 / V` is the effective sample size, e.g.
+`k_eff = m` for equal weights `a_j = 1 / m`, or `k_eff = 1 / ∑ w_c^2` for contig weights
+`w_c` summing to `1`). Then for every `ε ≥ 0`,
+`Pr(|S - 𝔼[S]| ≥ ε) ≤ 2 * exp (-2 * ε ^ 2 / V)`. -/
+theorem hoeffding_weighted_bounded {m : ℕ} {State : Fin m → Type*}
+    [∀ j, Fintype (State j)] [∀ j, DecidableEq (State j)]
+    (prob : ∀ j, State j → ℝ)
+    (X : ∀ j, State j → ℝ)
+    (a : Fin m → ℝ)
+    (hp0 : ∀ j s, 0 ≤ prob j s)
+    (hp1 : ∀ j, ∑ s : State j, prob j s = 1)
+    (hX0 : ∀ j s, 0 ≤ X j s)
+    (hX1 : ∀ j s, X j s ≤ 1)
+    {ε : ℝ} (hε : 0 ≤ ε)
+    (hV : 0 < ∑ j : Fin m, (a j) ^ 2) :
+    let P : (∀ j, State j) → ℝ := fun ω => ∏ j : Fin m, prob j (ω j)
+    let μ : Fin m → ℝ := fun j => ∑ s : State j, prob j s * X j s
+    let S : (∀ j, State j) → ℝ := fun ω => ∑ j : Fin m, a j * X j (ω j)
+    let E : ℝ := ∑ j : Fin m, a j * μ j
+    let V : ℝ := ∑ j : Fin m, (a j) ^ 2
+    ∑ ω ∈ Finset.univ.filter (fun ω => ε ≤ |S ω - E|), P ω ≤
+      2 * Real.exp (-2 * ε ^ 2 / V) := by
+  intro P μ S E V
+  have hP0 : ∀ ω, 0 ≤ P ω := fun ω => Finset.prod_nonneg (fun j _ => hp0 j (ω j))
+  have hmgf : ∀ t : ℝ, ∑ ω : (∀ j, State j), P ω * Real.exp (t * (S ω - E)) ≤
+      Real.exp (t ^ 2 * V / 8) := by
+    intro t
+    have hrew : ∀ ω : (∀ j, State j),
+        P ω * Real.exp (t * (S ω - E)) =
+          ∏ j : Fin m, (prob j (ω j) * Real.exp ((t * a j) * (X j (ω j) - μ j))) := by
+      intro ω
+      dsimp only [P, S, E]
+      have hdiff : t * ((∑ j, a j * X j (ω j)) - ∑ j, a j * μ j) =
+          ∑ j : Fin m, (t * a j) * (X j (ω j) - μ j) := by
+        rw [← Finset.sum_sub_distrib, Finset.mul_sum]
+        apply Finset.sum_congr rfl
+        intro j _; ring
+      rw [hdiff, Real.exp_sum, ← Finset.prod_mul_distrib]
+    simp_rw [hrew]
+    rw [← Fintype.prod_sum (fun j s => prob j s * Real.exp ((t * a j) * (X j s - μ j)))]
+    have hprod_le : ∀ (s : Finset (Fin m)) (u v : Fin m → ℝ),
+        (∀ j ∈ s, 0 ≤ u j) → (∀ j ∈ s, u j ≤ v j) → ∏ j ∈ s, u j ≤ ∏ j ∈ s, v j := by
+      intro s u v hu huv
+      induction s using Finset.induction_on with
+      | empty => simp
+      | insert j s hj ih =>
+        rw [Finset.prod_insert hj, Finset.prod_insert hj]
+        have hj0 := hu j (Finset.mem_insert_self j s)
+        have hj_le := huv j (Finset.mem_insert_self j s)
+        have hs0 := Finset.prod_nonneg (fun i hi => hu i (Finset.mem_insert_of_mem hi))
+        have hs_le := ih (fun i hi => hu i (Finset.mem_insert_of_mem hi))
+          (fun i hi => huv i (Finset.mem_insert_of_mem hi))
+        exact mul_le_mul hj_le hs_le hs0 (le_trans hj0 hj_le)
+    calc ∏ j : Fin m, ∑ s : State j, prob j s * Real.exp ((t * a j) * (X j s - μ j))
+        ≤ ∏ j : Fin m, Real.exp ((t * a j) ^ 2 / 8) :=
+          hprod_le Finset.univ _ _
+            (fun j _ => Finset.sum_nonneg (fun s _ => mul_nonneg (hp0 j s) (le_of_lt (Real.exp_pos _))))
+            (fun j _ => hoeffding_lemma_bounded (prob j) (X j) (hp0 j) (hp1 j) (hX0 j) (hX1 j) (t * a j))
+      _ = Real.exp (t ^ 2 * V / 8) := by
+          rw [← Real.exp_sum]
+          congr 1
+          dsimp only [V]
+          rw [← Finset.sum_div, Finset.mul_sum]
+          have h1 : ∀ j : Fin m, (t * a j) ^ 2 = t ^ 2 * (a j) ^ 2 := fun j => by ring
+          simp_rw [h1]
+  have hup : ∑ ω ∈ Finset.univ.filter (fun ω => ε ≤ S ω - E), P ω ≤
+      Real.exp (-2 * ε ^ 2 / V) := by
+    let t : ℝ := 4 * ε / V
+    have ht : 0 ≤ t := by dsimp [t]; positivity
+    have hmarkov :
+        Real.exp (t * ε) * ∑ ω ∈ Finset.univ.filter (fun ω => ε ≤ S ω - E), P ω ≤
+          ∑ ω, P ω * Real.exp (t * (S ω - E)) := by
+      rw [Finset.mul_sum]
+      calc ∑ ω ∈ Finset.univ.filter (fun ω => ε ≤ S ω - E), Real.exp (t * ε) * P ω
+          ≤ ∑ ω ∈ Finset.univ.filter (fun ω => ε ≤ S ω - E), P ω * Real.exp (t * (S ω - E)) := by
+            apply Finset.sum_le_sum
+            intro ω hω
+            have hge : ε ≤ S ω - E := (Finset.mem_filter.mp hω).2
+            rw [mul_comm (Real.exp (t * ε))]
+            exact mul_le_mul_of_nonneg_left (Real.exp_le_exp.mpr (by nlinarith)) (hP0 ω)
+        _ ≤ ∑ ω, P ω * Real.exp (t * (S ω - E)) :=
+            Finset.sum_le_univ_sum_of_nonneg (fun ω => mul_nonneg (hP0 ω) (le_of_lt (Real.exp_pos _)))
+    have hcomb := le_trans hmarkov (hmgf t)
+    have hmul := mul_le_mul_of_nonneg_left hcomb (le_of_lt (Real.exp_pos (-(t * ε))))
+    rw [← mul_assoc, ← Real.exp_add, neg_add_cancel, Real.exp_zero, one_mul, ← Real.exp_add] at hmul
+    convert hmul using 2
+    dsimp [t]
+    have hVne : V ≠ 0 := ne_of_gt hV
+    field_simp [hVne]
+    ring
+  have hlo : ∑ ω ∈ Finset.univ.filter (fun ω => ε ≤ E - S ω), P ω ≤
+      Real.exp (-2 * ε ^ 2 / V) := by
+    let t : ℝ := -(4 * ε / V)
+    have h4 : 0 ≤ 4 * ε / V := by positivity
+    have hmarkov :
+        Real.exp ((4 * ε / V) * ε) * ∑ ω ∈ Finset.univ.filter (fun ω => ε ≤ E - S ω), P ω ≤
+          ∑ ω, P ω * Real.exp (t * (S ω - E)) := by
+      rw [Finset.mul_sum]
+      calc ∑ ω ∈ Finset.univ.filter (fun ω => ε ≤ E - S ω), Real.exp ((4 * ε / V) * ε) * P ω
+          ≤ ∑ ω ∈ Finset.univ.filter (fun ω => ε ≤ E - S ω), P ω * Real.exp (t * (S ω - E)) := by
+            apply Finset.sum_le_sum
+            intro ω hω
+            have hge : ε ≤ E - S ω := (Finset.mem_filter.mp hω).2
+            rw [mul_comm (Real.exp ((4 * ε / V) * ε))]
+            apply mul_le_mul_of_nonneg_left _ (hP0 ω)
+            apply Real.exp_le_exp.mpr
+            dsimp [t]
+            nlinarith
+        _ ≤ ∑ ω, P ω * Real.exp (t * (S ω - E)) :=
+            Finset.sum_le_univ_sum_of_nonneg (fun ω => mul_nonneg (hP0 ω) (le_of_lt (Real.exp_pos _)))
+    have hcomb := le_trans hmarkov (hmgf t)
+    have hmul := mul_le_mul_of_nonneg_left hcomb (le_of_lt (Real.exp_pos (-((4 * ε / V) * ε))))
+    rw [← mul_assoc, ← Real.exp_add, neg_add_cancel, Real.exp_zero, one_mul, ← Real.exp_add] at hmul
+    convert hmul using 2
+    dsimp [t]
+    have hVne : V ≠ 0 := ne_of_gt hV
+    field_simp [hVne]
+    ring
+  let S_abs := Finset.univ.filter (fun ω => ε ≤ |S ω - E|)
+  let S_up := Finset.univ.filter (fun ω => ε ≤ S ω - E)
+  let S_lo := Finset.univ.filter (fun ω => ε ≤ E - S ω)
+  have hsub : S_abs ⊆ S_up ∪ S_lo := by
+    intro ω hω
+    simp only [S_abs, S_up, S_lo, Finset.mem_union, Finset.mem_filter, Finset.mem_univ,
+      true_and] at hω ⊢
+    rcases le_abs.mp hω with h | h
+    · left; exact h
+    · right; linarith
+  calc ∑ ω ∈ S_abs, P ω
+      ≤ ∑ ω ∈ S_up ∪ S_lo, P ω :=
+        Finset.sum_le_sum_of_subset_of_nonneg hsub (fun ω _ _ => hP0 ω)
+    _ ≤ (∑ ω ∈ S_up, P ω) + (∑ ω ∈ S_lo, P ω) := by
+        have hui := Finset.sum_union_inter (s₁ := S_up) (s₂ := S_lo) (f := P)
+        have hinter : 0 ≤ ∑ ω ∈ S_up ∩ S_lo, P ω := Finset.sum_nonneg (fun ω _ => hP0 ω)
+        linarith
+    _ ≤ Real.exp (-2 * ε ^ 2 / V) + Real.exp (-2 * ε ^ 2 / V) := add_le_add hup hlo
+    _ = 2 * Real.exp (-2 * ε ^ 2 / V) := by ring
 
 /-! ### Exact Chimeric Masking Expectation Model -/
 

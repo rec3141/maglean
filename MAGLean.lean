@@ -1,3 +1,4 @@
+import MAGLean.Sha256
 import MAGLean.Kernel
 import MAGLean.Basic
 import MAGLean.Markers

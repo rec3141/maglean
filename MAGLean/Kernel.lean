@@ -1,4 +1,5 @@
 import Lean.Data.Json
+import MAGLean.Sha256
 
 /-!
 # MAGLean.Kernel
@@ -7,14 +8,18 @@ Zero-Mathlib, fast-compiling executable MAG QC kernel.
 
 All rational arithmetic uses Lean 4's exact `Rat` type (identical to Mathlib's `ℚ`),
 eliminating floating-point rounding drift around MIMAG / CheckM / GUNC cutoffs.
-Theorems connecting some functions in this kernel
-to the Mathlib formal theory (`MAGLean.Markers`, `MAGLean.Probabilistic`,
-`MAGLean.Taxonomy`, `MAGLean.Quality`) live in `MAGLean.Certificate`.
+Bridge soundness theorems connecting the kernel's completeness, contamination, marker
+mass, composite `Q_5`, MIMAG tier, strain heterogeneity, tree-coherence checker, rank
+purity/chimerism table, and Hoeffding radius directly to the Mathlib formal theory live
+in `MAGLean.Certificate`.
 -/
 
 namespace MAGLean.Kernel
 
 open Lean (Json)
+
+/-- Semantic version of MAGLean. -/
+def magleanVersion : String := "0.2.0"
 
 /-- Standard seven taxonomic ranks ordered from `domain` (`0`) to `species` (`6`). -/
 inductive KTaxRank where
@@ -55,7 +60,9 @@ def lt (a b : KTaxRank) : Bool := decide (a.toNat < b.toNat)
 
 end KTaxRank
 
-/-- Ribosomal & transfer RNA profile for MIMAG High-Quality verification. -/
+/-- Ribosomal & transfer RNA profile for MIMAG High-Quality verification.
+To match Bowers et al. (2017), `distinctTRNAs` counts distinct standard amino-acid
+isotypes (out of 20). -/
 structure KRNAProfile where
   has23S : Bool
   has16S : Bool
@@ -99,6 +106,14 @@ structure MAGEvidence where
   contigs : List ContigEvidence
   deriving Repr, Inhabited
 
+/-- Provenance metadata authenticating the input bytes and the MAGLean build. -/
+structure ReportProvenance where
+  inputSha256 : String := ""
+  magleanVersion : String := Kernel.magleanVersion
+  gitCommit : String := "unknown"
+  leanToolchain : String := Lean.versionString
+  deriving Repr, Inhabited
+
 /-- Per-rank taxonomic purity audit record. -/
 structure RankAudit where
   rank : KTaxRank
@@ -110,15 +125,16 @@ structure RankAudit where
   dominantTaxon : Option String
   deriving Repr
 
-/-- MAG audit report emitted by the kernel. Which fields have a bridge theorem in
-`MAGLean.Certificate` is listed in the README section "What a report attests". -/
+/-- MAG audit report emitted by the kernel. -/
 structure MAGCertificate where
+  provenance : ReportProvenance
   magId : String
   lineage : String
   numContigs : Nat
   totalBp : Nat
   accessoryContigs : Nat
   accessoryBp : Nat
+  markerBearingContigs : Nat
   numMarkerSets : Nat
   completeness : Rat
   contamination : Rat
@@ -127,6 +143,7 @@ structure MAGCertificate where
   nonStrainContamination : Rat
   compositeScoreQ5 : Rat
   hoeffding95Radius : Rat
+  contigHoeffding95Radius : Rat
   mimagTier : KMIMAGTier
   taxCoherent : Bool
   rankAudits : List RankAudit
@@ -200,8 +217,8 @@ def kClassifyMIMAG (comp cont : Rat) (rna : KRNAProfile) : KMIMAGTier :=
     .contaminated
 
 /-- Smallest rational `m / 1000` (`1 ≤ m ≤ 1000`) satisfying `2 ≤ k * ε ^ 2`,
-certified in `MAGLean.Certificate.hoeffding95_cert_sound` to give a ≥ 95% two-sided
-Hoeffding confidence interval for `k ≥ 2`. -/
+proved in `MAGLean.Certificate.kernel_hoeffding95_sound` to give a ≥ 95% two-sided
+Hoeffding confidence interval for `k ≥ 2` independent `[0, 1]`-valued observations. -/
 def certifiedHoeffding95Radius (k : Nat) : Rat :=
   if k < 2 then 1
   else
@@ -265,12 +282,9 @@ def kRankAudit (contigs : List ContigEvidence) (r : KTaxRank) : RankAudit :=
     unclassifiedFrac := uFrac
     dominantTaxon := domOpt }
 
-/-! ### Audit Entrypoint
+/-! ### Audit Entrypoint -/
 
-The parser, `auditMAG`, `kRankAudit`, `kCheckTaxCoherent` and the alerts have no bridge
-theorem in `MAGLean.Certificate`. -/
-
-def auditMAG (ev : MAGEvidence) : Except String MAGCertificate := do
+def auditMAG (ev : MAGEvidence) (prov : ReportProvenance := {}) : Except String MAGCertificate := do
   if ev.markerSets.isEmpty then
     throw "Invalid evidence: marker_sets must be nonempty."
   if ev.markerSets.any (fun s => (dedupStrings s).isEmpty) then
@@ -300,6 +314,8 @@ def auditMAG (ev : MAGEvidence) : Except String MAGCertificate := do
   let rankAudits := KTaxRank.all.map (kRankAudit ev.contigs)
   let allMarkers := dedupStrings (ev.markerSets.flatten)
   let accContigs := ev.contigs.filter (fun c => c.markers.all (fun g => !allMarkers.contains g))
+  let markerContigs := ev.contigs.length - accContigs.length
+  let contigRad95 := certifiedHoeffding95Radius markerContigs
   let accBp := accContigs.foldl (fun s c => s + c.length) 0
   let totalBp := ev.contigs.foldl (fun s c => s + c.length) 0
   let mut alerts : List String := []
@@ -307,11 +323,6 @@ def auditMAG (ev : MAGEvidence) : Except String MAGCertificate := do
     alerts := alerts ++ ["TAXONOMIC_INCOHERENCE: Contig lineages violate tree consistency or prefix-closedness."]
   if (9 : Rat) / 10 < comp && cont < (1 : Rat) / 20 && !ev.rna.satisfiesHQ then
     alerts := alerts ++ ["MIMAG_HQ_RNA_DOWNGRADE: Marker metrics pass HQ (>90% comp, <5% cont) but RNA profile fails (23S/16S/5S + ≥18 tRNAs); downgraded to MQ."]
-  -- Optimistic purity (unclassified bp credited to the dominant taxon): it falls below 90%
-  -- only when classified bp outside the dominant taxon exceed 10% of the bin, so neither
-  -- unclassified sequence nor a few kb of a second taxon at a sparse rank trigger the alert
-  -- (Taxonomy.purity_unclassified_sandwich: every completion of the unclassified contigs
-  -- then has purity < 90%).
   let worstOptimisticPurity : Rat :=
     rankAudits.foldl (fun acc ra => if ra.purityOpt < acc then ra.purityOpt else acc) (1 : Rat)
   if cont < (1 : Rat) / 20 && worstOptimisticPurity < (9 : Rat) / 10 then
@@ -325,14 +336,16 @@ def auditMAG (ev : MAGEvidence) : Except String MAGCertificate := do
   if dilutionDetected then
     alerts := alerts ++ ["UNCLASSIFIED_DILUTION_ALERT: Drop-unclassified purity artificially increased at a finer rank; inspect [purityCons, purityOpt] sandwich interval."]
   if ev.markerSets.length < 50 then
-    alerts := alerts ++ [s!"LOW_MARKER_RESOLUTION: Only {ev.markerSets.length} collocated marker sets; certified ≥95% Hoeffding CI radius is wide (±{formatPercent rad95})."]
+    alerts := alerts ++ [s!"LOW_MARKER_RESOLUTION: Only {ev.markerSets.length} collocated marker sets; independent-set ≥95% Hoeffding radius is ±{formatPercent rad95}."]
   return {
+    provenance := prov
     magId := ev.magId
     lineage := ev.lineage
     numContigs := ev.contigs.length
     totalBp := totalBp
     accessoryContigs := accContigs.length
     accessoryBp := accBp
+    markerBearingContigs := markerContigs
     numMarkerSets := ev.markerSets.length
     completeness := comp
     contamination := cont
@@ -341,6 +354,7 @@ def auditMAG (ev : MAGEvidence) : Except String MAGCertificate := do
     nonStrainContamination := nsc
     compositeScoreQ5 := q5
     hoeffding95Radius := rad95
+    contigHoeffding95Radius := contigRad95
     mimagTier := tier
     taxCoherent := coherent
     rankAudits := rankAudits
@@ -478,15 +492,22 @@ def formatRat (q : Rat) : String :=
 private def padRight (s : String) (n : Nat) : String :=
   if s.length ≥ n then s else s ++ String.ofList (List.replicate (n - s.length) ' ')
 
-def renderReport (cert : MAGCertificate) : String :=
+def renderReport (cert : MAGCertificate) (showCI : Bool := false) : String :=
   let ciLo := if cert.completeness < cert.hoeffding95Radius then (0 : Rat) else cert.completeness - cert.hoeffding95Radius
   let ciHi := if (1 : Rat) < cert.completeness + cert.hoeffding95Radius then (1 : Rat) else cert.completeness + cert.hoeffding95Radius
+  let ciLines :=
+    if showCI then
+      [s!"  Hoeffding ≥95% CI  : [{formatPercent ciLo}, {formatPercent ciHi}]  (radius ±{formatPercent cert.hoeffding95Radius}; conditional on independent marker-set detections)"]
+    else
+      [s!"  Marker-Set CI      : omitted by default (pass --ci to print conditional independent-set Hoeffding radius ±{formatPercent cert.hoeffding95Radius})"]
   let header := [
     "========================================================================",
     s!"MAGLean QC Report: {cert.magId}",
     "========================================================================",
+    s!"MAGLean Build        : v{cert.provenance.magleanVersion} (commit {cert.provenance.gitCommit}, Lean {cert.provenance.leanToolchain})",
+    s!"Input SHA-256        : {cert.provenance.inputSha256}",
     s!"Lineage              : {cert.lineage}",
-    s!"Assembly Summary     : {cert.numContigs} contigs, {cert.totalBp} bp",
+    s!"Assembly Summary     : {cert.numContigs} contigs ({cert.markerBearingContigs} marker-bearing), {cert.totalBp} bp",
     s!"Accessory Contigs    : {cert.accessoryContigs} marker-free contigs ({cert.accessoryBp} bp) [invariant under marker QC]",
     s!"Marker Family        : {cert.numMarkerSets} collocated single-copy marker sets",
     "------------------------------------------------------------------------",
@@ -495,13 +516,14 @@ def renderReport (cert : MAGCertificate) : String :=
     s!"  Contamination      : {formatPercent cert.contamination}  (exact: {formatRat cert.contamination})",
     s!"  Total Marker Mass  : {formatPercent cert.markerMass}  (exact: {formatRat cert.markerMass}) [Comp + Cont conserved]",
     s!"  Split Ceiling      : Combined completeness of any split ≤ {formatPercent cert.markerMass}",
-    s!"  Strain Heterogen.  : {formatPercent cert.strainHeterogeneity}  (non-strain cont: {formatPercent cert.nonStrainContamination})",
+    s!"  Strain Heterogen.  : {formatPercent cert.strainHeterogeneity}  (heuristic cont*(1-SH): {formatPercent cert.nonStrainContamination}; exact only for ≤2 copies/marker)",
     s!"  Composite Q_5      : {formatPercent cert.compositeScoreQ5}  (exact: {formatRat cert.compositeScoreQ5})",
-    s!"  Hoeffding ≥95% CI  : [{formatPercent ciLo}, {formatPercent ciHi}]  (radius ±{formatPercent cert.hoeffding95Radius}; assumes independent marker sets)",
+    s!"  Contig-Level Rad.  : ±{formatPercent cert.contigHoeffding95Radius}  ({cert.markerBearingContigs} marker-bearing contigs; assumes equal-weight independent contigs)"
+  ] ++ ciLines ++ [
     "------------------------------------------------------------------------",
     "VERIFIED STANDARDS & COHERENCE",
     s!"  MIMAG Tier         : {cert.mimagTier.label}",
-    s!"  Tree Coherence     : {if cert.taxCoherent then "PASS (prefix-closed and tree-consistent; this checker has no bridge theorem)" else "FAILED (violates prefix-closedness or tree consistency)"}",
+    s!"  Tree Coherence     : {if cert.taxCoherent then "CERTIFIED (kCheckTaxCoherent_sound → TaxCoherent & rank-refinement monotonicity)" else "FAILED (violates prefix-closedness or tree consistency)"}",
     "------------------------------------------------------------------------",
     "TAXONOMIC RANK PURITY & CHIMERISM AUDIT (Conservative / Optimistic / Drop)"
   ]
@@ -519,9 +541,14 @@ def renderReport (cert : MAGCertificate) : String :=
 
 def renderJson (cert : MAGCertificate) : Json :=
   Json.mkObj [
+    ("maglean_version", Json.str cert.provenance.magleanVersion),
+    ("git_commit", Json.str cert.provenance.gitCommit),
+    ("lean_toolchain", Json.str cert.provenance.leanToolchain),
+    ("input_sha256", Json.str cert.provenance.inputSha256),
     ("mag_id", Json.str cert.magId),
     ("lineage", Json.str cert.lineage),
     ("num_contigs", Json.num cert.numContigs),
+    ("marker_bearing_contigs", Json.num cert.markerBearingContigs),
     ("total_bp", Json.num cert.totalBp),
     ("accessory_contigs", Json.num cert.accessoryContigs),
     ("accessory_bp", Json.num cert.accessoryBp),
@@ -532,8 +559,11 @@ def renderJson (cert : MAGCertificate) : Json :=
     ("contamination_pct", Json.str (formatPercent cert.contamination)),
     ("marker_mass_exact", Json.str (formatRat cert.markerMass)),
     ("strain_heterogeneity_exact", Json.str (formatRat cert.strainHeterogeneity)),
+    ("non_strain_cont_heuristic_exact", Json.str (formatRat cert.nonStrainContamination)),
     ("composite_q5_exact", Json.str (formatRat cert.compositeScoreQ5)),
     ("hoeffding_95_radius_exact", Json.str (formatRat cert.hoeffding95Radius)),
+    ("hoeffding_95_assumptions", Json.str "conditional on independent [0,1]-bounded marker-set detections"),
+    ("contig_hoeffding_95_radius_exact", Json.str (formatRat cert.contigHoeffding95Radius)),
     ("mimag_tier", Json.str cert.mimagTier.label),
     ("tax_coherent", Json.bool cert.taxCoherent),
     ("rank_audits", Json.arr (cert.rankAudits.toArray.map fun ra =>

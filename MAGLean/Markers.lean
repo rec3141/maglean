@@ -431,12 +431,14 @@ theorem pure_merge_zero_cont_iff (M : MarkerFamily α) {f₁ f₂ : α → ℕ}
     contamination M (f₁ + f₂) = 0 ↔ sharedCompleteness M f₁ f₂ = 0 := by
   rw [(pure_merge_contamination_eq_shared M hp₁ hp₂).1]
 
-/-- **Constructive Stealth-Chimera Impossibility Theorem**:
-For *every* marker family `M` whose total marker set contains at least two distinct
-markers, there exist two completely disjoint, pure, nonempty genome profiles `f₁` and `f₂`
-whose chimeric merge `f₁ + f₂` achieves `completeness = 1` and `contamination = 0`.
-Hence marker-only completeness/contamination can *never* certify purity without
-contig-level taxonomic, coverage, or linkage evidence. -/
+/-- **Disjoint-Support Zero-Contamination Construction**:
+For every marker family `M` whose union `M.allMarkers` contains at least two distinct
+markers, there exist two marker-count profiles `f₁` and `f₂` with disjoint support
+(`∀ g, f₁ g = 0 ∨ f₂ g = 0`), strictly positive completeness, and zero marker
+contamination (`contamination M f₁ = 0`, `contamination M f₂ = 0`), whose sum `f₁ + f₂`
+scores `completeness M (f₁ + f₂) = 1` and `contamination M (f₁ + f₂) = 0`.
+Thus marker completeness and contamination alone cannot distinguish `f₁ + f₂` from
+one copy of every marker. -/
 theorem stealth_chimera_exists (M : MarkerFamily α) (hcard : 2 ≤ M.allMarkers.card) :
     ∃ f₁ f₂ : α → ℕ,
       (∀ g, f₁ g = 0 ∨ f₂ g = 0) ∧
@@ -630,6 +632,49 @@ theorem nonStrainContamination_bounds {cont sh : ℚ}
   constructor
   · nlinarith
   · nlinarith
+
+/-- **Pair-Weighting vs. Excess-Copy Discrepancy Counterexample**:
+When a marker has `≥ 3` copies, `strainHeterogeneity` weights markers quadratically by
+unordered copy pairs `n * (n - 1) / 2` while `contamination` weights excess copies
+linearly by `n - 1`. With two equally weighted singleton markers—marker A having 3
+identical strain copies (`2` excess, `3` high-identity pairs out of `3`) and marker B
+having 2 inter-species copies (`1` excess, `0` high-identity pairs out of `1`)—total
+contamination is `3 / 2`, pooled `SH = 3 / 4`, and `cont * (1 - SH) = 3 / 8`, which
+strictly underestimates the true inter-species excess contamination `1 / 2`. -/
+theorem nonStrainContamination_pair_weighting_discrepancy :
+    let cont : ℚ := ((2 : ℚ) + 1) / 2
+    let sh : ℚ := strainHeterogeneity (3 + 0) (3 + 1)
+    let trueInterSpeciesExcess : ℚ := (0 + 1) / 2
+    cont = 3 / 2 ∧
+    sh = 3 / 4 ∧
+    nonStrainContamination cont sh = 3 / 8 ∧
+    nonStrainContamination cont sh < trueInterSpeciesExcess := by
+  dsimp only
+  unfold strainHeterogeneity nonStrainContamination
+  norm_num
+
+/-- **Exactness Boundary for `cont * (1 - SH)`**:
+For equally weighted singleton marker sets where every multi-copy marker has *exactly 2*
+copies (so each contributes `1` excess copy and `1` pair), `n_strain` strain-duplicated
+markers and `n_foreign` inter-species-duplicated markers out of `k > 0` markers satisfy
+`nonStrainContamination cont sh = n_foreign / k` identically. -/
+theorem nonStrainContamination_exact_for_double_copies
+    (k n_strain n_foreign : ℕ) (hk : 0 < k) :
+    let cont : ℚ := ((n_strain + n_foreign : ℕ) : ℚ) / (k : ℚ)
+    let sh : ℚ := strainHeterogeneity n_strain (n_strain + n_foreign)
+    nonStrainContamination cont sh = (n_foreign : ℚ) / (k : ℚ) := by
+  intro cont sh
+  unfold nonStrainContamination
+  dsimp only [cont, sh, strainHeterogeneity]
+  split_ifs with h0
+  · have hn1 : n_strain = 0 := by omega
+    have hn2 : n_foreign = 0 := by omega
+    simp [hn1, hn2]
+  · have hkpos : (k : ℚ) ≠ 0 := Nat.cast_ne_zero.mpr (Nat.ne_of_gt hk)
+    have htpos : ((n_strain + n_foreign : ℕ) : ℚ) ≠ 0 := Nat.cast_ne_zero.mpr h0
+    push_cast at htpos ⊢
+    field_simp [hkpos, htpos]
+    ring
 
 end FamilyTheorems
 

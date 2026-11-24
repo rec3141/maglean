@@ -8,7 +8,7 @@ Lean 4 kernel axioms (`propext`, `Classical.choice`, `Quot.sound`) — zero `sor
 zero custom axioms, zero `Lean.ofReduceBool` / `native_decide` trust.
 -/
 
--- 1. Marker Algebra & Conservation (MAGLean.Markers)
+-- 1. Marker Algebra, Conservation & Strain Heterogeneity (MAGLean.Markers)
 #print axioms MAGLean.comp_add_cont_eq_mass
 #print axioms MAGLean.conservation_law
 #print axioms MAGLean.multi_conservation
@@ -19,20 +19,24 @@ zero custom axioms, zero `Lean.ofReduceBool` / `native_decide` trust.
 #print axioms MAGLean.pure_merge_zero_cont_iff
 #print axioms MAGLean.stealth_chimera_exists
 #print axioms MAGLean.accessory_invariance
+#print axioms MAGLean.nonStrainContamination_pair_weighting_discrepancy
+#print axioms MAGLean.nonStrainContamination_exact_for_double_copies
 
 -- 2. Finite-Sample Statistics & Concentration (MAGLean.Probabilistic)
 #print axioms MAGLean.Probabilistic.empComp_expectation
 #print axioms MAGLean.Probabilistic.empComp_variance
 #print axioms MAGLean.Probabilistic.chebyshev_completeness_bound
 #print axioms MAGLean.Probabilistic.hoeffding_lemma_bernoulli
+#print axioms MAGLean.Probabilistic.hoeffding_lemma_bounded
 #print axioms MAGLean.Probabilistic.hoeffding_completeness_bound
+#print axioms MAGLean.Probabilistic.hoeffding_weighted_bounded
 #print axioms MAGLean.Probabilistic.marker_count_sufficient
 #print axioms MAGLean.Probabilistic.hoeffdingRadius_strict_shrink
 #print axioms MAGLean.Probabilistic.single_marker_chimeric_expectation
 #print axioms MAGLean.Probabilistic.chimeric_completeness_inflation
 #print axioms MAGLean.Probabilistic.mimag_mq_evasion_expectation
 
--- 3. Taxonomic Hierarchy, Lineage Loss & GUNC Purity (MAGLean.Taxonomy)
+-- 3. Taxonomic Hierarchy, Lineage Loss & Contig Purity (MAGLean.Taxonomy)
 #print axioms MAGLean.Taxonomy.lineage_loss_bias_bound
 #print axioms MAGLean.Taxonomy.lineage_loss_exact_complete
 #print axioms MAGLean.Taxonomy.lca_zero_lineage_loss
@@ -61,9 +65,18 @@ zero custom axioms, zero `Lean.ofReduceBool` / `native_decide` trust.
 #print axioms MAGLean.Binning.global_metagenome_marker_conservation
 #print axioms MAGLean.Binning.filterValidBins_sound
 
--- 7. Executable Kernel Soundness Bridge (MAGLean.Certificate)
+-- 7. Executable Kernel Soundness Bridges (MAGLean.Certificate)
+#print axioms MAGLean.Certificate.kCompleteness_eq_completeness
+#print axioms MAGLean.Certificate.kContamination_eq_contamination
+#print axioms MAGLean.Certificate.kMarkerMass_eq_markerMass
+#print axioms MAGLean.Certificate.kCompositeQ5_eq_compositeScore
+#print axioms MAGLean.Certificate.binMarkerCount_eq_binCounts
 #print axioms MAGLean.Certificate.kCompleteness_add_kContamination_eq_kMarkerMass
 #print axioms MAGLean.Certificate.kClassifyMIMAG_eq_classifyMIMAG
+#print axioms MAGLean.Certificate.kStrainHeterogeneity_eq
+#print axioms MAGLean.Certificate.kNonStrainCont_eq
+#print axioms MAGLean.Certificate.kCheckTaxCoherent_sound
+#print axioms MAGLean.Certificate.kRankAudit_eq_taxonomy
+#print axioms MAGLean.Certificate.kRankAudit_stealth_alert_sound
 #print axioms MAGLean.Certificate.hoeffding95_cert_sound
 #print axioms MAGLean.Certificate.kernel_hoeffding95_sound
-#print axioms MAGLean.Certificate.checkTaxCoherent_sound

@@ -1,8 +1,8 @@
 # MAGLean — Formal Verification & Mathematical Guarantees for Metagenome-Assembled Genomes
 
-**MAGLean** is a Lean 4 + Mathlib formalization and proof-carrying quality-control (QC) auditor for Metagenome-Assembled Genomes (MAGs).
+**MAGLean** is a Lean 4 + Mathlib formalization of quality-control (QC) metrics for Metagenome-Assembled Genomes (MAGs), with a command-line auditor that computes those metrics from a JSON description of a MAG.
 
-Rather than treating completeness, contamination, chimerism, taxonomic placement, MIMAG tiers, and ANI dereplication as ad-hoc pipeline heuristics, MAGLean turns them into **machine-checked mathematical contracts** (zero `sorry`, zero custom axioms) paired with a fast, compiled native QC auditor (`maglean`) using exact rational arithmetic (`Rat`).
+Rather than treating completeness, contamination, chimerism, taxonomic placement, MIMAG tiers, and ANI dereplication as ad-hoc pipeline heuristics, MAGLean states them as definitions and **machine-checked theorems about those definitions** (zero `sorry`; the 46 theorems listed in `Tests/AxiomAudit.lean` depend only on Lean's standard axioms), paired with a compiled native QC auditor (`maglean`) using exact rational arithmetic (`Rat`). The theorems are about the formal model. Whether the model matches CheckM, GUNC, dRep or a given MAG is a separate question that Lean does not check; see [What a report attests](#what-a-report-attests).
 
 ---
 
@@ -16,7 +16,7 @@ Rather than treating completeness, contamination, chimerism, taxonomic placement
 | **Standards & Scores** | `MAGLean/Quality.lean` | Exhaustive, mutually exclusive MIMAG draft + contaminated classification (Bowers et al., 2017 cutoffs), HQ-to-MQ RNA downgrade, linear composite score `Q_α = Comp - α·Cont` chimera-incentive thresholds (Parks `Q_5`), and purity-gated scoring. |
 | **Dereplication (ANI/AF)** | `MAGLean/Dereplication.lean` | Constructive ANI triangle-inequality failure, overlap-conditioned relaxed triangle inequality (`AF₁₂ + AF₂₃ > 1`), and star-cluster diameter bounds on a shared gapless reference coordinate set. |
 | **Metagenome Binning** | `MAGLean/Binning.lean` | Single-valued `BinMap` disjointness, assembly base-pair additivity, single-family marker-mass additivity across bins + unbinned contigs, and QC-gated bin filtering. |
-| **Verified Executable CLI** | `MAGLean/Kernel.lean`, `MAGLean/Certificate.lean`, `Main.lean` | Zero-Mathlib native CLI binary (`maglean`) with exact rational arithmetic and machine-checked soundness bridge theorems linking CLI outputs to the Mathlib theory. |
+| **Verified Executable CLI** | `MAGLean/Kernel.lean`, `MAGLean/Certificate.lean`, `Main.lean` | Zero-Mathlib native CLI binary (`maglean`) with exact rational arithmetic. `Certificate.lean` proves bridge theorems for some kernel functions (listed under [What a report attests](#what-a-report-attests)); the remaining report lines are computed without one. |
 
 ---
 
@@ -63,6 +63,25 @@ Rather than treating completeness, contamination, chimerism, taxonomic placement
 
 ---
 
+## What a report attests
+
+The auditor's report is a list of values computed from the input JSON. It contains no proof term, no hash of the input and no build or version identifier, so reproducing the report requires the input and a matching executable; the report alone cannot authenticate either. Individual values can be checked independently.
+
+All biological evidence is taken from the input as given: the marker sets, the marker hits per contig, the rRNA and tRNA fields, the strain pairs and the taxonomy of each contig. The repository has no converter from CheckM, GTDB-Tk or barrnap output.
+
+Report lines whose kernel function has a theorem in `MAGLean/Certificate.lean`:
+
+| Report line | Theorem | What it establishes |
+| :--- | :--- | :--- |
+| Total Marker Mass | `kCompleteness_add_kContamination_eq_kMarkerMass` | The kernel's completeness and contamination sum to its marker mass. It does not state that the kernel's completeness equals `Markers.completeness`. |
+| MIMAG Tier | `kClassifyMIMAG_eq_classifyMIMAG` | The kernel's classifier agrees with `Quality.classifyMIMAG` on the same completeness, contamination and RNA inputs. |
+| Strain Heterogeneity | `kStrainHeterogeneity_eq`, `kNonStrainCont_eq` | Agreement with the `Markers` definitions. |
+| Hoeffding CI radius | `kernel_hoeffding95_sound` | For `k ≥ 2`, the kernel's exact rational radius (`hoeffding_95_radius_exact` in the JSON output) satisfies the 95% bound for `k` independent Bernoulli observations with a common probability. Whether marker sets meet that model is not established, and the theorem does not cover the rounded percentage in the text report. |
+
+Report lines with no bridge theorem at this commit: Completeness and Contamination as values (only their sum is covered), Split Ceiling, Composite Q_5, Accessory Contigs, the per-rank purity and chimerism table, and all alerts. Tree Coherence is printed from `Kernel.kCheckTaxCoherent`; the theorem `checkTaxCoherent_sound` is about a separate checker defined in `Certificate.lean`, and no theorem relates the two. The JSON parser and `auditMAG` are also outside the theorems.
+
+---
+
 ## Building & Running
 
 ### 1. Build the Formal Theory Library & Native CLI
@@ -76,12 +95,12 @@ lake build maglean
 lake env lean Tests/AxiomAudit.lean
 ```
 
-### 3. Run the Proof-Carrying MAG QC Auditor
+### 3. Run the MAG QC Auditor
 ```bash
-# Human-readable verified QC certificates
+# Human-readable QC reports
 .lake/build/bin/maglean examples/hq_ecoli_mag.json examples/stealth_chimera_mag.json
 
-# Machine-readable JSON certificate
+# Machine-readable JSON report
 .lake/build/bin/maglean --json examples/unclassified_dilution_mag.json
 
 # Run full automated CLI test suite

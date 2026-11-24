@@ -4,8 +4,9 @@ import MAGLean.Markers
 # MAGLean.Quality
 
 Formalization of the MIMAG (Minimum Information about a Metagenome-Assembled Genome,
-Bowers et al. 2017) quality classification standard, composite ranking scores
-`Q_α = Comp - α * Cont` (Parks et al. / dRep), and anti-chimerism score gating.
+Bowers et al. 2017) draft quality thresholds (omitting the single-contig Finished tier
+and assembly-gap review clauses), linear composite ranking scores `Q_α = Comp - α * Cont`
+(Parks et al.), and anti-chimerism score gating.
 
 ## Main Results
 
@@ -20,13 +21,16 @@ Bowers et al. 2017) quality classification standard, composite ranking scores
 * `compositeScore_chimera_incentive`: Exact necessary and sufficient condition under
   which adding a foreign fragment `c` strictly *increases* `Q_α`:
   `comp(c) > (α + 1) * shared(f, c) + α * cont(c)`.
-* `drep_Q5_chimera_threshold`: Corollary for `α = 5` (dRep/Parks)—any pure contaminant
-  whose markers overlap `< 1/6` of its own completeness is *rewarded* by `Q_5`.
+* `drep_Q5_chimera_threshold`: Corollary for `α = 5` (Parks et al.'s `Q_5 = Comp - 5 * Cont`;
+  note `dRep` additionally adds strain-heterogeneity, `log10(N50)`, and centrality terms)—any
+  zero-contamination fragment whose markers overlap `< 1/6` of its own completeness increases `Q_5`.
 -/
 
 namespace MAGLean.Quality
 
-/-- Ribosomal & transfer RNA completeness profile required by MIMAG High Quality. -/
+/-- Ribosomal & transfer RNA completeness profile required by MIMAG High Quality.
+To match Bowers et al. (2017), `distinctTRNAs` must count distinct standard amino-acid
+isotypes encoded (out of 20) rather than raw anticodon species. -/
 structure RNAProfile where
   has23S : Bool
   has16S : Bool
@@ -36,8 +40,8 @@ structure RNAProfile where
 
 namespace RNAProfile
 
-/-- MIMAG High-Quality RNA requirement: 23S, 16S, and 5S rRNA genes plus at least
-18 distinct tRNA types. -/
+/-- MIMAG High-Quality RNA requirement: 23S, 16S, and 5S rRNA genes plus tRNAs for
+at least 18 standard amino acids (`distinctTRNAs ≥ 18` when supplied as amino-acid count). -/
 def satisfiesHQ (r : RNAProfile) : Bool :=
   r.has23S && r.has16S && r.has5S && decide (18 ≤ r.distinctTRNAs)
 
@@ -181,7 +185,7 @@ section CompositeScore
 variable {α_m : Type*} [DecidableEq α_m]
 
 /-- Linear composite quality score `Q_α(f) = completeness - α * contamination`
-(e.g., Parks et al. / dRep use `α = 5`). -/
+(Parks et al. use `α = 5`; `dRep`'s default score adds `+ Cont * (SH / 100) + 0.5 * log10(N50) + (centrality - S_ani)`). -/
 def compositeScore (pen : ℚ) (M : MarkerFamily α_m) (f : α_m → ℕ) : ℚ :=
   completeness M f - pen * contamination M f
 
@@ -214,9 +218,9 @@ theorem compositeScore_chimera_incentive (pen : ℚ) (M : MarkerFamily α_m) (f 
   have h := compositeScore_add_delta pen M f c
   constructor <;> intro hlt <;> linarith
 
-/-- **dRep / Parks `Q_5` Chimera Threshold Corollary**: For `α = 5` and a pure foreign
-fragment `c` (`cont(c) = 0`), adding `c` strictly *increases* `Q_5` whenever
-`shared(f, c) < comp(c) / 6`! -/
+/-- **Parks `Q_5` Chimera Threshold Corollary**: For `α = 5` (`Comp - 5 * Cont`) and a
+zero-contamination fragment `c` (`cont(c) = 0`), adding `c` strictly *increases* `Q_5`
+whenever `shared(f, c) < comp(c) / 6`. -/
 theorem drep_Q5_chimera_threshold (M : MarkerFamily α_m) (f c : α_m → ℕ)
     (hpure : contamination M c = 0) :
     compositeScore 5 M f < compositeScore 5 M (f + c) ↔

@@ -4,8 +4,10 @@ import MAGLean.Markers
 # MAGLean.Taxonomy
 
 Formal theory of taxonomic hierarchies, lineage-specific marker loss (DPANN /
-Patescibacteria / symbionts), safe LCA rank selection, and contig-level taxonomic
-purity / GUNC-style chimerism guarantees across taxonomic ranks.
+Patescibacteria / symbionts), safe LCA rank selection, and whole-contig taxonomic
+purity and chimerism bounds across taxonomic ranks (assigning at most one taxon per
+contig per rank, modeling whole-contig classifiers rather than GUNC's gene-level
+conditional taxonomic entropy `CSS` and reference representation score `RRS`).
 
 ## Main Results
 
